@@ -1,4 +1,4 @@
-const CACHE = 'ortswehr-deploy-v5';
+const CACHE = 'ortswehr-2.8.10';
 const STATIC = ['./manifest.json', './icons/icon-192.png', './icons/icon-512.png'];
 self.addEventListener('install', e => {
   e.waitUntil(caches.open(CACHE).then(c => c.addAll(STATIC)));

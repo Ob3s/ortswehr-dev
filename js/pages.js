@@ -853,10 +853,10 @@ registerPage('uebung-detail', async (el, {id, typ}) => {
     <div id="einsatz-reaktionen" class="card">⏳ Lade...</div>
     <div class="card" style="display:flex;gap:0.8rem">
       <button class="btn btn-full" id="btn-kommt"
-        style="background:#16a34a;color:#fff;font-size:1.1rem;padding:0.8rem"
+        style="background:#16a34a;color:#fff;font-size:1rem;padding:0.6rem"
         onclick="einsatzReagieren('${id}','kommt')">👍 Ich komme</button>
       <button class="btn btn-full" id="btn-kommt-nicht"
-        style="background:#dc2626;color:#fff;font-size:1.1rem;padding:0.8rem"
+        style="background:#dc2626;color:#fff;font-size:1rem;padding:0.6rem"
         onclick="einsatzReagieren('${id}','kommt_nicht')">👎 Komme nicht</button>
     </div>
     ${fw.isWehrfuehrer() ? `<div style="padding:0 0 0.5rem">${eintragBtn}</div>` : ''}
@@ -1287,8 +1287,8 @@ registerPage('profil', async (el) => {
     </div>
     <div class="card">
       <div style="display:flex;gap:0.5rem;margin-bottom:0.5rem">
-        <button class="btn btn-secondary btn-full" onclick="navigate('einstellungen')">⚙️ Einstellungen</button>
-        <button class="btn btn-secondary btn-full" onclick="pruefeAufUpdate(true)">🔄 Updates</button>
+        <button class="btn btn-secondary" style="flex:1" onclick="navigate('einstellungen')">⚙️ Einstellungen</button>
+        <button class="btn btn-secondary" style="flex:1" onclick="pruefeAufUpdate(true)">🔄 Updates</button>
       </div>
       <button class="btn btn-danger btn-full" onclick="abmelden()">Abmelden</button>
     </div>
@@ -2181,10 +2181,10 @@ registerPage('kameraden', async (el) => {
 
   el.innerHTML = `
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:0.6rem;margin-bottom:0.2rem">
-      <button class="btn btn-secondary btn-full" onclick="navigate('lehrgaenge')" style="display:flex;align-items:center;justify-content:center;gap:0.4rem;padding:0.7rem">
+      <button class="btn btn-secondary btn-full" onclick="navigate('lehrgaenge')" style="display:flex;align-items:center;justify-content:center;gap:0.4rem;padding:0.45rem 0.6rem">
         <span style="font-size:1.2rem">📚</span><span style="font-weight:600">Lehrgänge</span>
       </button>
-      <button class="btn btn-secondary btn-full" onclick="navigate('statistik')" style="display:flex;align-items:center;justify-content:center;gap:0.4rem;padding:0.7rem">
+      <button class="btn btn-secondary btn-full" onclick="navigate('statistik')" style="display:flex;align-items:center;justify-content:center;gap:0.4rem;padding:0.45rem 0.6rem">
         <span style="font-size:1.2rem">📊</span><span style="font-weight:600">Statistiken</span>
       </button>
     </div>
@@ -2721,8 +2721,10 @@ registerPage('fahrzeug-form', async (el, {id}) => {
           ${wehren.map(w => `<option value="${w.id}" ${fahrzeug?.ortswehrId===w.id?'selected':''}>${w.name}</option>`).join('')}
         </select>
       </div>
-      <button class="btn btn-primary btn-full" onclick="fahrzeugSpeichern('${id||''}')">💾 Speichern</button>
-      ${id ? `<button class="btn btn-danger btn-full" onclick="fahrzeugLoeschen('${id}')">🗑 Löschen</button>` : ''}
+      <div class="btn-row" style="margin-top:0.5rem">
+        <button class="btn btn-primary" onclick="fahrzeugSpeichern('${id||''}')">💾 Speichern</button>
+        ${id ? `<button class="btn btn-danger" onclick="fahrzeugLoeschen('${id}')">🗑 Löschen</button>` : ''}
+      </div>
     </div>
   `;
 });
@@ -2778,8 +2780,10 @@ registerPage('pruefaufgabe-form', async (el, {id, fahrzeugId: vorFahrzeugId}) =>
       <div class="form-row"><label>Bezeichnung</label><input id="pa-bez" value="${aufgabe?.bezeichnung||''}"></div>
       <div class="form-row"><label>Intervall (Monate)</label><input id="pa-int" type="number" min="1" value="${aufgabe?.intervall||''}"></div>
       <div class="form-row"><label>Letztes Prüfdatum</label><input id="pa-dat" type="date" value="${letztesDatum}"></div>
-      <button class="btn btn-primary btn-full" onclick="pruefaufgabeSpeichern('${id||''}')">💾 Speichern</button>
-      ${id ? `<button class="btn btn-danger btn-full" onclick="pruefaufgabeLoeschen('${id}')">🗑 Löschen</button>` : ''}
+      <div class="btn-row" style="margin-top:0.5rem">
+        <button class="btn btn-primary" onclick="pruefaufgabeSpeichern('${id||''}')">💾 Speichern</button>
+        ${id ? `<button class="btn btn-danger" onclick="pruefaufgabeLoeschen('${id}')">🗑 Löschen</button>` : ''}
+      </div>
     </div>
   `;
 });

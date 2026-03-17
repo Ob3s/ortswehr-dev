@@ -1,6 +1,6 @@
 {
   "name": "Ortswehr Verwaltung",
-  "short_name": "Ortswehr",
+  "short_name": "Ortswehr DEV",
   "description": "Verwaltung für die freiwillige Feuerwehr",
   "start_url": "/ortswehr-dev/",
   "display": "standalone",

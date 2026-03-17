@@ -1,0 +1,428 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+  <meta name="theme-color" content="#cc2200">
+  <meta name="app-version" content="2.8.9">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="Ortswehr">
+  <title>Ortswehr</title>
+  <link rel="manifest" href="manifest.json">
+  <link rel="apple-touch-icon" href="icons/icon-192.png">
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+
+<!-- Lade-Overlay: sichtbar bis Firebase onAuthStateChanged antwortet -->
+<div id="app-loading" style="position:fixed;inset:0;background:var(--bg,#f1f5f9);display:flex;align-items:center;justify-content:center;z-index:9999;font-size:2rem">🚒</div>
+
+<!-- Login -->
+<div id="login-page" class="hidden">
+  <div class="login-box">
+    <div class="login-logo">🚒</div>
+    <h1>Freiwillige Feuerwehr Beeskow</h1>
+    <p class="sub">Löschzug Oegeln</p>
+    <div class="form-row">
+      <label>Benutzername</label>
+      <input id="login-email" type="text" placeholder="vorname.nachname" autocomplete="username" autocapitalize="none">
+    </div>
+    <div class="form-row">
+      <label>Passwort</label>
+      <input id="login-pass" type="password" placeholder="••••••••" autocomplete="current-password">
+    </div>
+    <button class="btn btn-primary btn-full" id="login-btn">Anmelden</button>
+    <p class="error-msg" id="login-error"></p>
+    <p style="text-align:center;margin-top:0.8rem">
+      <a href="#" id="pw-reset-link" style="color:var(--red);font-size:0.82rem;text-decoration:none">Passwort vergessen?</a>
+    </p>
+    <div id="pw-reset-box" style="display:none;margin-top:0.8rem">
+      <input id="reset-email" type="text" placeholder="Dein Benutzername" autocapitalize="none">
+      <button type="button" class="btn btn-primary btn-full" id="reset-btn" style="margin-top:0.5rem">Reset-Mail senden</button>
+      <p id="reset-msg" style="font-size:0.82rem;margin-top:0.5rem;text-align:center"></p>
+    </div>
+    <p id="login-version" style="text-align:center;font-size:0.7rem;color:#374151;margin-top:1rem 0 0"></p>
+    <script>document.getElementById('login-version').textContent=document.querySelector('meta[name="app-version"]')?.content||''</script>
+  </div>
+</div>
+
+<!-- App Shell -->
+<div id="app" class="hidden">
+  <header>
+    <button id="back-btn" class="header-back hidden">&#8249;</button>
+    <h1 id="page-title">Dashboard</h1>
+    <span id="header-uhr" style="font-size:0.82rem;color:#fff;font-weight:700;margin-right:0.3rem;flex-shrink:0;letter-spacing:0.03em"></span>
+    <button id="header-action" class="header-action hidden"></button>
+  </header>
+  <main id="main-content"></main>
+  <nav class="bottom-nav">
+    <button class="nav-btn aktiv" data-page="dashboard"><span class="nav-icon">🏠</span><span>Start</span></button>
+    <button class="nav-btn" data-page="einsaetze"><span class="nav-icon">🚨</span><span>Einsätze</span></button>
+    <button class="nav-btn" data-page="dienste"><span class="nav-icon">📅</span><span>Dienste</span></button>
+    <button class="nav-btn" data-page="profil"><span class="nav-icon">👤</span><span>Profil</span></button>
+    <button class="nav-btn hidden" data-page="kameraden" id="nav-kameraden"><span class="nav-icon">👥</span><span>Kameraden</span></button>
+
+  </nav>
+</div>
+
+<div id="toast"></div>
+<div id="update-banner" style="display:none;position:fixed;bottom:70px;left:50%;transform:translateX(-50%);z-index:999;background:#1e293b;color:#fff;border-radius:14px;padding:0.7rem 1.2rem;align-items:center;gap:0.8rem;box-shadow:0 4px 20px rgba(0,0,0,0.3);font-size:0.88rem;white-space:nowrap">
+  🆕 Update verfügbar: <span id="update-version-label" style="font-family:monospace;font-size:0.8rem;opacity:0.8"></span>
+  <button id="update-btn" style="background:var(--red);color:#fff;border:none;border-radius:8px;padding:0.35rem 0.9rem;font-size:0.85rem;cursor:pointer;font-weight:600">Jetzt aktualisieren</button>
+  <button id="update-schliessen" style="background:none;border:none;color:#9ca3af;font-size:1.1rem;cursor:pointer;padding:0 0.2rem">✕</button>
+</div>
+
+<script type="module">
+  import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js';
+  import { getAuth, signInWithEmailAndPassword, signOut, onAuthStateChanged, sendPasswordResetEmail }
+    from 'https://www.gstatic.com/firebasejs/10.8.0/firebase-auth.js';
+  import { getFirestore, collection, doc, getDoc, getDocs, addDoc, setDoc, updateDoc, deleteDoc, query, where, orderBy, Timestamp, onSnapshot }
+    from 'https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js';
+  import { getMessaging, getToken, onMessage }
+    from 'https://www.gstatic.com/firebasejs/10.8.0/firebase-messaging.js';
+  import { getStorage, ref, uploadBytes, getDownloadURL, deleteObject }
+    from 'https://www.gstatic.com/firebasejs/10.8.0/firebase-storage.js';
+
+  const firebaseConfig = {
+    apiKey: "AIzaSyDwV6LJUnL660nQnnlQ47QZnBc_bXzIezU",
+    authDomain: "ffw-oegeln-791ca.firebaseapp.com",
+    projectId: "ffw-oegeln-791ca",
+    storageBucket: "ffw-oegeln-791ca.firebasestorage.app",
+    messagingSenderId: "170034438620",
+    appId: "1:170034438620:web:f2e40bf21b6a9b6987ef19"
+  };
+  const VAPID = 'BDpa4LsgE1SlkshoyiVWt7EQbSi2YVp0Z_27N1Ms6sxGA4qogEPI3PWcRTwn3vvsYAhT8b1mD3Hpj6plCx5CySg';
+
+  const firebaseApp = initializeApp(firebaseConfig);
+  const auth      = getAuth(firebaseApp);
+  const db        = getFirestore(firebaseApp);
+  const storage   = getStorage(firebaseApp);
+  let   messaging = null;
+  try { messaging = getMessaging(firebaseApp); } catch(e) {}
+
+  window.fw = {
+    auth, db, messaging, storage, app: firebaseApp, user: null, profil: null, _vapid: VAPID,
+    uploadPdf: async (file, path) => {
+      const storageRef = ref(storage, path);
+      await uploadBytes(storageRef, file);
+      return await getDownloadURL(storageRef);
+    },
+    deletePdf: async (path) => {
+      try { await deleteObject(ref(storage, path)); } catch(e) {}
+    },
+
+    async getDoc(path)          { return getDoc(doc(db, path)); },
+    async setDoc(path, data)    { return setDoc(doc(db, path), data, { merge: true }); },
+    async updateDoc(path, data) { return updateDoc(doc(db, path), data); },
+    async deleteDoc(path)       { return deleteDoc(doc(db, path)); },
+    async addDoc(col, data)     { return addDoc(collection(db, col), data); },
+    async getDocs(col, ...c) {
+      const q = c.length ? query(collection(db, col), ...c) : collection(db, col);
+      return getDocs(q);
+    },
+    where, orderBy, Timestamp,
+    onSnapshot(col, ...c) { const q = c.length ? query(collection(db, col), ...c) : collection(db, col); return onSnapshot(q, () => {}); },
+    onDocSnapshot(path, cb) { return onSnapshot(doc(db, path), cb); },
+    onQuerySnapshot(col, cb, ...c) { const q = c.length ? query(collection(db, col), ...c) : collection(db, col); return onSnapshot(q, cb); },
+    isWehrfuehrer()    { return this.profil?.rolle === 'wehrfuehrer'; },
+    isGruppenfuehrer() { return ['gruppenführer','zugführer','wehrfuehrer'].includes(this.profil?.rolle); },
+    isZugfuehrer()     { return ['zugführer','wehrfuehrer'].includes(this.profil?.rolle); },
+
+    toast(msg, isError = false) {
+      const t = document.getElementById('toast');
+      t.textContent = msg;
+      t.className = 'show' + (isError ? ' error' : '');
+      setTimeout(() => t.className = '', 2800);
+    },
+    setTitle(t)  { document.getElementById('page-title').textContent = t; },
+    showBack(cb) { const b=document.getElementById('back-btn'); b.classList.remove('hidden'); b.onclick=cb; },
+    hideBack()   { document.getElementById('back-btn').classList.add('hidden'); },
+    showHeaderAction(label, cb) { const b=document.getElementById('header-action'); b.classList.remove('hidden'); b.textContent=label; b.onclick=cb; },
+    hideHeaderAction() { document.getElementById('header-action').classList.add('hidden'); },
+
+    async registerPush() {
+      if (!messaging) { console.warn('Push: messaging nicht verfügbar'); return null; }
+
+      // Capacitor native App erkennen
+      const isNative = window.Capacitor?.isNativePlatform?.();
+      if (isNative) {
+        try {
+          const { PushNotifications } = window.Capacitor.Plugins;
+          if (!PushNotifications) { console.warn('Push: PushNotifications Plugin nicht verfügbar'); return null; }
+          const perm = await PushNotifications.requestPermissions();
+          if (perm.receive !== 'granted') { this.toast('Push: Berechtigung verweigert', true); return null; }
+          await PushNotifications.register();
+          PushNotifications.addListener('registration', async (token) => {
+            console.log('Capacitor FCM Token:', token.value);
+            const gespeichert = fw.profil?.fcmToken;
+            if (token.value !== gespeichert) {
+              await fw.setDoc('users/' + fw.user.uid, { fcmToken: token.value });
+              if (fw.profil) fw.profil.fcmToken = token.value;
+              console.log('Capacitor Token gespeichert');
+            }
+          });
+          PushNotifications.addListener('registrationError', (err) => {
+            console.error('Capacitor Push Fehler:', err);
+          });
+          PushNotifications.addListener('pushNotificationReceived', (notification) => {
+            const alarm = notification.data?.alarm === 'true';
+            fw.toast((alarm ? '🚨 ' : '🔔 ') + notification.title + ': ' + notification.body);
+          });
+        } catch(e) {
+          console.error('Capacitor Push Fehler:', e);
+        }
+        return null;
+      }
+
+      // Web PWA Weg
+      try {
+        const perm = await Notification.requestPermission();
+        if (perm !== 'granted') { this.toast('Push: Berechtigung verweigert', true); return null; }
+        const swReg = await navigator.serviceWorker.register('/firebase-messaging-sw.js');
+        await new Promise(resolve => {
+          if (swReg.active) { resolve(); return; }
+          const sw = swReg.installing || swReg.waiting;
+          if (sw) { sw.addEventListener('statechange', e => { if (e.target.state === 'activated') resolve(); }); }
+          else { swReg.addEventListener('updatefound', () => {
+            swReg.installing.addEventListener('statechange', e => { if (e.target.state === 'activated') resolve(); });
+          }); }
+          setTimeout(resolve, 3000);
+        });
+        const token = await getToken(messaging, { vapidKey: VAPID, serviceWorkerRegistration: swReg });
+        if (token) {
+          const gespeichert = fw.profil?.fcmToken;
+          if (token !== gespeichert) {
+            console.log('FCM Token erneuert');
+            await this.setDoc('users/' + this.user.uid, { fcmToken: token });
+            if (fw.profil) fw.profil.fcmToken = token;
+          }
+        } else {
+          console.warn('Push: Kein Token erhalten');
+        }
+        return token;
+      } catch(e) {
+        console.error('Push Fehler:', e);
+        this.toast('Push: ' + (e.message || e.code), true);
+        return null;
+      }
+    },
+  };
+
+  if (messaging) {
+    onMessage(messaging, payload => {
+      const title    = payload.notification?.title || '🚒 Ortswehr';
+      const body     = payload.notification?.body  || '';
+      const alarm    = payload.data?.alarm === 'true';
+      const uebungId = payload.data?.uebungId || '';
+      console.log('FCM Vordergrund:', title);
+      fw.toast((alarm ? '🚨 ' : '🔔 ') + title + ': ' + body);
+      if (alarm) {
+        // Alarmton über Web Audio API
+        try {
+          const ctx = new (window.AudioContext || window.webkitAudioContext)();
+          const spieleTon = (freq, start, dauer) => {
+            const osc = ctx.createOscillator();
+            const gain = ctx.createGain();
+            osc.connect(gain); gain.connect(ctx.destination);
+            osc.frequency.value = freq;
+            osc.type = 'square';
+            gain.gain.setValueAtTime(0.6, ctx.currentTime + start);
+            gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + start + dauer);
+            osc.start(ctx.currentTime + start);
+            osc.stop(ctx.currentTime + start + dauer);
+          };
+          // 3x Alarm-Piep
+          spieleTon(880, 0.0, 0.3);
+          spieleTon(880, 0.4, 0.3);
+          spieleTon(880, 0.8, 0.6);
+        } catch(e) { console.warn('Audio nicht verfügbar:', e); }
+        if (uebungId) setTimeout(() => navigate('uebung-detail', { id: uebungId, typ: 'einsatz' }), 1500);
+      }
+    });
+  }
+
+  // Login
+  document.getElementById('login-btn').addEventListener('click', async () => {
+    const name = document.getElementById('login-email').value.trim().toLowerCase();
+    const pass = document.getElementById('login-pass').value;
+    document.getElementById('login-error').textContent = '';
+    const email = name.includes('@') ? name : name + '@ffw-oegeln.de';
+    try {
+      await signInWithEmailAndPassword(auth, email, pass);
+      // Credentials im nativen Store speichern (überlebt Cache-Leerung)
+      if (typeof window.CredentialStore !== 'undefined') {
+        window.CredentialStore.save(email, pass);
+      }
+    }
+    catch(e) { document.getElementById('login-error').textContent = 'Benutzername oder Passwort falsch'; }
+  });
+  ['login-email','login-pass'].forEach(id => {
+    document.getElementById(id).addEventListener('keydown', e => {
+      if (e.key === 'Enter') document.getElementById('login-btn').click();
+    });
+  });
+
+  // Passwort vergessen
+  document.getElementById('pw-reset-link').addEventListener('click', e => {
+    e.preventDefault();
+    const box = document.getElementById('pw-reset-box');
+    box.style.display = box.style.display === 'none' ? 'block' : 'none';
+  });
+  document.getElementById('reset-btn').addEventListener('click', async () => {
+    const email = document.getElementById('reset-email').value.trim();
+    const msg   = document.getElementById('reset-msg');
+    if (!email) { msg.textContent='Bitte E-Mail eingeben'; msg.style.color='var(--red)'; return; }
+    try {
+      await sendPasswordResetEmail(auth, email);
+      msg.textContent = '✅ Reset-Mail gesendet!'; msg.style.color = 'var(--success)';
+    } catch(e) { msg.textContent = 'E-Mail nicht gefunden'; msg.style.color = 'var(--red)'; }
+  });
+
+  // Auth State
+  onAuthStateChanged(auth, async (user) => {
+    if (user) {
+      fw.user = user;
+      const snap = await getDoc(doc(db, 'users', user.uid));
+      if (snap.exists()) {
+        fw.profil = { id: user.uid, ...snap.data() };
+        // Theme sofort anwenden
+        if (fw.profil.theme === 'klassisch') document.body.setAttribute('data-theme', 'klassisch');
+        else document.body.removeAttribute('data-theme');
+      } else {
+        fw.profil = { id: user.uid, email: user.email, rolle: 'kamerad',
+          vorname: '', nachname: '', dienstgrad: '',
+          notif_einsatz: true, notif_uebung: true, notif_bestaetigung: true };
+        await setDoc(doc(db, 'users', user.uid), fw.profil);
+      }
+      if (fw.isWehrfuehrer()) {
+        document.getElementById('nav-kameraden').classList.remove('hidden');
+      }
+      if (fw.profil.notif_einsatz || fw.profil.notif_uebung || fw.profil.notif_bestaetigung) {
+        // Warten bis SW bereit ist bevor Push registriert wird
+        navigator.serviceWorker.ready.then(() => fw.registerPush()).catch(() => {});
+      }
+      document.getElementById('login-page').classList.add('hidden');
+      document.getElementById('app').classList.remove('hidden');
+      document.getElementById('app-loading')?.remove();
+      navigate('dashboard');
+    } else {
+      fw.user = null; fw.profil = null;
+      document.getElementById('nav-kameraden').classList.add('hidden');
+      document.getElementById('app').classList.add('hidden');
+      // Auto-Login: gespeicherte Credentials aus nativem Store versuchen
+      if (typeof window.CredentialStore !== 'undefined') {
+        const savedEmail = window.CredentialStore.getEmail();
+        const savedPass  = window.CredentialStore.getPassword();
+        if (savedEmail && savedPass) {
+          try {
+            await signInWithEmailAndPassword(auth, savedEmail, savedPass);
+            return; // onAuthStateChanged feuert erneut mit User
+          } catch(e) {
+            // Credentials ungültig (z.B. Passwort geändert) → löschen und Login zeigen
+            window.CredentialStore.clear();
+          }
+        }
+      }
+      document.getElementById('login-page').classList.remove('hidden');
+      document.getElementById('app-loading')?.remove();
+    }
+  });
+
+  // Nachrichten vom Service Worker empfangen (z.B. nach Notification-Klick)
+  navigator.serviceWorker.addEventListener('message', e => {
+    if (e.data?.type === 'NAVIGATE') {
+      const url = new URL(e.data.url);
+      const uebungId = url.searchParams.get('uebung');
+      if (uebungId) navigate('uebung-detail', { id: uebungId, typ: 'einsatz' });
+    }
+  });
+
+  window.navigate = function(page, params = {}) {
+    // Aktiven Live-Listener aufräumen beim Seitenwechsel
+    if (window._einsatzListener) { window._einsatzListener(); window._einsatzListener = null; }
+    if (window._newsFeedListener) { window._newsFeedListener(); window._newsFeedListener = null; }
+    document.querySelectorAll('.nav-btn').forEach(b => b.classList.toggle('aktiv', b.dataset.page === page));
+    fw.hideBack(); fw.hideHeaderAction();
+    document.getElementById('main-content').innerHTML = '<div class="loading">⏳</div>';
+    window._pages[page]?.(document.getElementById('main-content'), params);
+  };
+  window._pages = {};
+  window.registerPage = (name, fn) => { window._pages[name] = fn; };
+  document.querySelectorAll('.nav-btn').forEach(b => b.addEventListener('click', () => navigate(b.dataset.page)));
+
+  // Neuen Kamerad anlegen ohne Wehrführer auszuloggen
+  window.createKamerad = async (email, pw, data) => {
+    const { initializeApp: iApp, getApp } = await import('https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js');
+    const { getAuth: gAuth, createUserWithEmailAndPassword: createUser } = await import('https://www.gstatic.com/firebasejs/10.8.0/firebase-auth.js');
+    let tmp; try { tmp = getApp('tmp'); } catch(e) { tmp = iApp(firebaseConfig, 'tmp'); }
+    const ta = gAuth(tmp);
+    const cred = await createUser(ta, email, pw);
+    await ta.signOut();
+    await setDoc(doc(db, 'users', cred.user.uid), { ...data, email, aktiv: true, notif_einsatz: true, notif_uebung: true, notif_bestaetigung: true });
+    return cred.user.uid;
+  };
+
+  if ('serviceWorker' in navigator) {
+    navigator.serviceWorker.register('/ortswehr/sw.js', { updateViaCache: 'none' }).then(reg => {
+      // Sofort auf Update prüfen
+      reg.update();
+      // Wenn neuer SW aktiviert → Seite automatisch neu laden
+      navigator.serviceWorker.addEventListener('controllerchange', () => {
+        window.location.reload();
+      });
+    });
+  }
+
+  // Update-Prüfung: version.json vom Server holen (nie gecacht)
+  window.pruefeAufUpdate = async (manuell = false) => {
+    try {
+      const res = await fetch('/ortswehr/version.json?t=' + Date.now(), { cache: 'no-store' });
+      const { version } = await res.json();
+      const lokal = document.querySelector('meta[name="app-version"]')?.content;
+      if (lokal && version && version !== lokal) {
+        const banner = document.getElementById('update-banner');
+        const label  = document.getElementById('update-version-label');
+        if (label) label.textContent = `v${version}`;
+        if (banner) banner.style.display = 'flex';
+        document.getElementById('update-btn').onclick = async () => {
+          document.getElementById('update-btn').textContent = '⏳ Wird aktualisiert...';
+          try {
+            const regs = await navigator.serviceWorker.getRegistrations();
+            await Promise.all(regs.map(r => r.unregister()));
+            const keys = await caches.keys();
+            await Promise.all(keys.map(k => caches.delete(k)));
+          } catch(e) {}
+          window.location.reload(true);
+        };
+        document.getElementById('update-schliessen').onclick = () => {
+          banner.style.display = 'none';
+        };
+      } else {
+        const banner = document.getElementById('update-banner');
+        if (banner) banner.style.display = 'none';
+        if (manuell) fw.toast('✅ App ist aktuell (v' + lokal + ')');
+      }
+    } catch(e) {
+      const bannerErr = document.getElementById('update-banner');
+      if (bannerErr) bannerErr.style.display = 'none';
+      if (manuell) fw.toast('Keine Verbindung', true);
+    }
+  };
+
+  // Beim Start prüfen (kurze Verzögerung damit SW-Registrierung abgeschlossen ist)
+  setTimeout(pruefeAufUpdate, 1500);
+
+  // Uhr
+  function tickUhr() {
+    const el = document.getElementById('header-uhr');
+    if (!el) return;
+    const now = new Date();
+    el.textContent = now.toLocaleTimeString('de-DE', {hour:'2-digit', minute:'2-digit', second:'2-digit'});
+  }
+  tickUhr();
+  setInterval(tickUhr, 1000);
+</script>
+<script src="js/pages.js" type="module" defer></script>
+</body>
+</html>

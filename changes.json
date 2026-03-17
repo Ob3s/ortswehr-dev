@@ -1,1 +1,1 @@
-{"version": "2.8.12", "datum": "17.03.2026", "punkte": ["Alarm: Laut/Leise regelt jetzt Stream-Volume korrekt", "Alarm: Stumm deaktiviert auch Vibration", "Alarm: Wegwischen der Notification stoppt den Alarm", "Startseite: PWA-Version zeigt -dev Suffix in DEV-App"]}
+{"version": "2.8.13", "datum": "17.03.2026", "punkte": ["Fahrzeug- und Geräteprüfungen: neues Dropdown auf Kameraden-Seite", "Prüfaufgaben: Wehrführer kann anlegen/bearbeiten/löschen", "Prüfaufgaben: Maschinisten können Prüfdatum aktualisieren", "Prüfaufgaben: Ampel-Anzeige (grün/gelb/rot) nach Fälligkeit"]}

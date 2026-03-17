@@ -1,1 +1,1 @@
-{"version": "2.8.10", "datum": "17.03.2026", "punkte": ["CSS: style.css im Update-Bundle enthalten"]}
+{"version": "2.8.11", "datum": "17.03.2026", "punkte": ["Update-Prüfung: version.json wird jetzt relativ geladen (DEV und PROD korrekt)"]}

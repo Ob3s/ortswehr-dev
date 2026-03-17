@@ -2654,8 +2654,8 @@ async function ladePruefaufgabenInline() {
           <div style="font-size:0.73rem;color:var(--muted)">${datumsAnzeige(a)}${a.intervall ? ` · alle ${a.intervall} Mon.` : ''}</div>
         </div>
         <div style="display:flex;gap:0.3rem;flex-shrink:0">
-          <button class="btn btn-sm btn-secondary" onclick="pruefDatumAktualisieren('${a.id}')">✅</button>
-          ${istWF ? `<button class="btn btn-sm btn-secondary" onclick="navigate('pruefaufgabe-form',{id:'${a.id}'})">✏️</button>` : ''}
+          <button class="btn btn-sm btn-secondary" style="font-size:0.7rem;padding:0.2rem 0.45rem" onclick="pruefDatumAktualisieren('${a.id}')">✅</button>
+          ${istWF ? `<button class="btn btn-sm btn-secondary" style="font-size:0.7rem;padding:0.2rem 0.45rem" onclick="navigate('pruefaufgabe-form',{id:'${a.id}'})">✏️</button>` : ''}
         </div>
       </div>`).join('');
   }
@@ -2671,8 +2671,8 @@ async function ladePruefaufgabenInline() {
       <summary style="padding:0.7rem 0.8rem;cursor:pointer;list-style:none;display:flex;align-items:center;justify-content:space-between;font-weight:600;font-size:0.9rem">
         <span>${f.name}${f.bezeichnung ? ` <span style="font-weight:400;color:var(--muted);font-size:0.8rem">(${f.bezeichnung})</span>` : ''}</span>
         <div style="display:flex;gap:0.4rem;align-items:center">
-          ${istWF ? `<button class="btn btn-sm btn-secondary" style="font-size:0.7rem;padding:0.2rem 0.5rem" onclick="event.stopPropagation();navigate('fahrzeug-form',{id:'${f.id}'})">✏️</button>
-          <button class="btn btn-sm btn-secondary" style="font-size:0.7rem;padding:0.2rem 0.5rem" onclick="event.stopPropagation();navigate('pruefaufgabe-form',{fahrzeugId:'${f.id}'})">+ Aufgabe</button>` : ''}
+          ${istWF ? `<button class="btn btn-sm btn-secondary" style="font-size:0.65rem;padding:0.15rem 0.4rem" onclick="event.stopPropagation();navigate('fahrzeug-form',{id:'${f.id}'})">✏️</button>
+          <button class="btn btn-sm btn-secondary" style="font-size:0.65rem;padding:0.15rem 0.4rem" onclick="event.stopPropagation();navigate('pruefaufgabe-form',{fahrzeugId:'${f.id}'})">+</button>` : ''}
           <span style="color:var(--muted)">▾</span>
         </div>
       </summary>

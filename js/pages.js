@@ -234,8 +234,11 @@ ${renderNaechsteDienste(naechster, zweiter)}
     <div style="text-align:center;color:#374151;font-size:0.7rem;margin-top:1.5rem;margin-bottom:0.5rem" id="version-display"></div>
   `;
   // Versions-Anzeige: "App-Version · PWA-Version"
-  const pwaVersion = document.querySelector('meta[name="app-version"]')?.content || '';
+  // Wenn die native App "-dev" im Namen hat, wird auch die PWA-Version mit "-dev" angezeigt
+  const pwaVersionRaw = document.querySelector('meta[name="app-version"]')?.content || '';
   const appVersion = typeof window.AppInfo !== 'undefined' ? window.AppInfo.getVersion() : null;
+  const isDev = appVersion?.includes('-dev') || false;
+  const pwaVersion = pwaVersionRaw + (isDev ? '-dev' : '');
   const versionEl = document.getElementById('version-display');
   if (versionEl) {
     versionEl.textContent = appVersion ? `${appVersion} · ${pwaVersion}` : pwaVersion;

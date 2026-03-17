@@ -200,7 +200,7 @@ textarea { resize: vertical; min-height: 80px; }
 .btn-danger    { background: #c00; color: #fff; }
 .btn-secondary { background: var(--border); color: var(--text); }
 .btn-ghost     { background: none; color: var(--red); padding-left: 0; }
-.btn-full      { width: 100%; margin-top: 0.6rem; padding: 0.65rem; font-size: 0.95rem; }
+.btn-full      { width: 100%; margin-top: 0.6rem; padding: 0.5rem; font-size: 0.9rem; }
 .btn-sm        { padding: 0.4rem 0.8rem; font-size: 0.8rem; border-radius: 8px; }
 .btn-row { display: flex; gap: 0.6rem; flex-wrap: wrap; margin-top: 1rem; }
 

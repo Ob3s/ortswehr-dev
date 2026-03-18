@@ -679,19 +679,19 @@ registerPage('dienste', async (el) => {
   const meineMap = new Map(aSnap.docs.map(d => [d.data().uebungId, d.data().status]));
   el.innerHTML = `
     <div class="card">${renderEintragListe(liste, meineMap)}</div>
-    ${fw.isWehrfuehrer() ? `
-    <div style="margin-top:1rem">
-      <button class="btn btn-secondary btn-sm btn-full" onclick="kalenderImportieren()" id="kal-btn">📅 Aus Google Kalender importieren</button>
-      <div id="kal-status" class="muted" style="font-size:0.8rem;text-align:center;margin-top:0.4rem"></div>
-    </div>` : ''}
     ${(fw.isWehrfuehrer() || istMaschinist) ? `
     <details class="card" style="margin-top:0.8rem;padding:0">
-      <summary style="font-weight:600;cursor:pointer;list-style:none;display:flex;align-items:center;justify-content:space-between;padding:0.4rem 0.8rem;font-size:0.8rem;border-radius:8px">
+      <summary style="font-weight:600;cursor:pointer;list-style:none;display:flex;align-items:center;justify-content:space-between;padding:0.4rem 0.8rem;font-size:13px;border-radius:8px">
         <span>🔧 Fahrzeug- und Geräteprüfungen</span>
         <span style="color:var(--muted)">▾</span>
       </summary>
       <div id="pruef-inline" style="padding:0 0.8rem 0.8rem">⏳ Lade...</div>
     </details>` : ''}
+    ${fw.isWehrfuehrer() ? `
+    <div style="margin-top:0.8rem">
+      <button class="btn btn-secondary btn-sm btn-full" onclick="kalenderImportieren()" id="kal-btn">📅 Aus Google Kalender importieren</button>
+      <div id="kal-status" class="muted" style="font-size:0.8rem;text-align:center;margin-top:0.4rem"></div>
+    </div>` : ''}
   `;
   if (fw.isWehrfuehrer() || istMaschinist) ladePruefaufgabenInline();
 });
@@ -2162,7 +2162,7 @@ registerPage('kameraden', async (el) => {
       const icons = { 'kein-datum': '📅', 'agt': '🔴', 'eh': '⚠️', 'dienstgrad': '🪖' };
       aufgabenHtml = `
         <details class="card" style="margin-bottom:0.6rem;padding:0">
-          <summary style="list-style:none;padding:0.4rem 0.8rem;cursor:pointer;display:flex;align-items:center;justify-content:space-between;font-size:0.8rem;border-radius:8px">
+          <summary style="list-style:none;padding:0.4rem 0.8rem;cursor:pointer;display:flex;align-items:center;justify-content:space-between;font-size:13px;border-radius:8px">
             <span style="font-weight:600;color:#f59e0b">⚠️ Offene Aufgaben (${aufgaben.length})</span>
             <span style="color:var(--muted);font-size:1.1rem">▾</span>
           </summary>
@@ -2665,7 +2665,7 @@ async function ladePruefaufgabenInline() {
 
   el.innerHTML = fahrzeuge.map(f => `
     <details style="margin-bottom:0.5rem;border:1px solid var(--border);border-radius:10px">
-      <summary style="padding:0.4rem 0.8rem;cursor:pointer;list-style:none;display:flex;align-items:center;justify-content:space-between;font-weight:600;font-size:0.8rem;border-radius:8px">
+      <summary style="padding:0.4rem 0.8rem;cursor:pointer;list-style:none;display:flex;align-items:center;justify-content:space-between;font-weight:600;font-size:13px;border-radius:8px">
         <span>${f.name}${f.bezeichnung ? ` <span style="font-weight:400;color:var(--muted);font-size:0.8rem">(${f.bezeichnung})</span>` : ''}</span>
         <div style="display:flex;gap:0.4rem;align-items:center">
           ${istWF ? `<button class="btn btn-sm btn-secondary" style="font-size:0.65rem;padding:0.15rem 0.4rem" onclick="event.stopPropagation();navigate('fahrzeug-form',{id:'${f.id}'})">✏️</button>

@@ -1,1 +1,1 @@
-[{"version": "20260317132714", "datum": "17.03.2026", "punkte": ["Fix: Maschinist sieht Fahrzeugpr\u00fcfungen jetzt \u00fcber Lehrgang statt Rolle", "UI: Accordion-Dropdowns kompakter"]}]
+[{"version": "20260318055941", "datum": "18.03.2026", "punkte": ["UI: btn-sm+btn-full Padding-Konflikt behoben", "UI: Accordion kompakter", "Cleanup: st\u00e4rkeRolle Fallback entfernt"]}]

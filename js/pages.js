@@ -1109,6 +1109,7 @@ window.berechneDauer = () => {
 };
 
 window.uebungSpeichern = async (id, forcTyp) => {
+  piperCleanup();
   const titel   = document.getElementById('f-titel').value.trim();
   let dauer_h = parseFloat(document.getElementById('f-dauer')?.value) || 0;
   const typ     = forcTyp === 'einsatz' ? 'einsatz' : 'dienst';
@@ -2827,6 +2828,31 @@ window.pruefaufgabeLoeschen = async (id) => {
 let _piperStream = null;
 let _piperScans  = []; // Array von base64-Strings
 
+// Wird bei jedem Seitenwechsel und beim Speichern aufgerufen
+window.piperCleanup = () => {
+  if (_piperStream) {
+    _piperStream.getTracks().forEach(t => t.stop());
+    _piperStream = null;
+  }
+  _piperScans = [];
+  const scans = document.getElementById('scan-scans');
+  if (scans) scans.innerHTML = '';
+  const btn = document.getElementById('scan-auslesen-btn');
+  if (btn) { btn.style.display = 'none'; }
+  const ergebnis = document.getElementById('scan-ergebnis');
+  if (ergebnis) ergebnis.style.display = 'none';
+};
+
+// navigate() in index.html räumt bereits Listener auf –
+// wir hängen uns dort zusätzlich rein
+const _origNavigate = window.navigate;
+if (_origNavigate) {
+  window.navigate = function(page, params = {}) {
+    piperCleanup();
+    return _origNavigate(page, params);
+  };
+}
+
 window.piperKameraStarten = async () => {
   try {
     _piperStream = await navigator.mediaDevices.getUserMedia({
@@ -2874,10 +2900,12 @@ window.piperStoppen = () => {
     _piperStream.getTracks().forEach(t => t.stop());
     _piperStream = null;
   }
-  document.getElementById('pieper-overlay').style.display = 'flex';
-  document.getElementById('pieper-overlay').textContent = '📷 Kamera aktivieren';
-  document.getElementById('scan-btn').disabled = true;
-  document.getElementById('scan-stop-btn').disabled = true;
+  const overlay = document.getElementById('pieper-overlay');
+  if (overlay) { overlay.style.display = 'flex'; overlay.textContent = '📷 Kamera aktivieren'; }
+  const scanBtn = document.getElementById('scan-btn');
+  if (scanBtn) scanBtn.disabled = true;
+  const stopBtn = document.getElementById('scan-stop-btn');
+  if (stopBtn) stopBtn.disabled = true;
 };
 
 window.piperAuslesen = async () => {

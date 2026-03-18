@@ -1029,45 +1029,35 @@ registerPage('uebung-form', async (el, {id, typ: vorTyp, alarm: mitAlarm}) => {
     const jetztZeit = `${jetztH}:${jetztM}`;
     el.innerHTML = `
       <div class="card">
-        <div style="font-family:'DM Serif Display',serif;font-size:1.3rem;color:var(--red);margin-bottom:1rem">🚨 Einsatz</div>
+        <div style="font-family:'DM Serif Display',serif;font-size:1.3rem;color:var(--red);margin-bottom:0.75rem">🚨 Einsatz</div>
         <input type="hidden" id="f-alarm" value="${mitAlarm ? '1' : '0'}">
-        <div class="btn-row" style="margin-top:0">
+        <div class="btn-row" style="margin-top:0;margin-bottom:0.75rem">
           <button class="btn btn-primary btn-full" onclick="uebungSpeichern('${id||''}','einsatz')">${u ? '💾 Speichern' : mitAlarm ? '🚨 Einsatz melden & Alarm senden' : '💾 Einsatz speichern'}</button>
           ${u ? `<button class="btn btn-danger" onclick="uebungLoeschen('${id}','einsatz')">🗑 Löschen</button>` : ''}
         </div>
-        ${u ? `<button class="btn btn-secondary btn-full" style="margin-top:0.5rem" onclick="einsatzNachbenachrichtigen('${id}')">🔔 Benachrichtigung erneut senden</button>` : ''}
-        <div style="margin-top:1rem">
-          <div class="form-row">
-            <label>Einsatzstichwort</label>
-            <input id="f-titel" value="${u?.titel||''}" placeholder="Brand, THL, Hilfeleistung…" autofocus>
-          </div>
-          <div class="form-row">
-            <label>Beginn</label>
-            <input id="f-beginn" type="time" value="${u?.zeitBeginn||jetztZeit}">
-          </div>
-          <div class="form-row">
-            <label>Ende (optional, kann nachgetragen werden)</label>
-            <input id="f-ende" type="time" value="${u?.zeitEnde||''}">
-          </div>
-          <div class="form-row ac-wrapper" style="position:relative">
-            <label>Einsatzort / Adresse (optional)</label>
-            <input id="f-ort" value="${u?.ort||''}" placeholder="Hauptstr. 12, Oegeln">
-          </div>
+        ${u ? `<button class="btn btn-secondary btn-full" style="margin-bottom:0.75rem" onclick="einsatzNachbenachrichtigen('${id}')">🔔 Benachrichtigung erneut senden</button>` : ''}
+        <input id="f-titel" value="${u?.titel||''}" placeholder="Einsatzstichwort" style="margin-bottom:0.5rem" autofocus>
+        <div style="display:flex;gap:0.5rem;margin-bottom:0.5rem">
+          <input id="f-beginn" type="time" value="${u?.zeitBeginn||jetztZeit}" style="flex:1">
+          <input id="f-ende" type="time" value="${u?.zeitEnde||''}" placeholder="Ende (opt.)" style="flex:1">
+        </div>
+        <div class="ac-wrapper" style="position:relative">
+          <input id="f-ort" value="${u?.ort||''}" placeholder="Einsatzort / Adresse (optional)">
         </div>
       </div>
       <div class="card" id="pieper-scanner-card">
         <div style="font-size:0.8rem;font-weight:600;color:var(--muted);margin-bottom:0.5rem">📟 PIEPER SCANNEN (optional)</div>
         <div style="position:relative;background:#000;border-radius:8px;overflow:hidden;aspect-ratio:4/3;cursor:pointer" onclick="piperVideoTippen()">
           <video id="pieper-video" autoplay playsinline muted style="width:100%;height:100%;object-fit:cover"></video>
-          <!-- Ausschnitt-Rahmen -->
+          <!-- Ausschnitt-Rahmen: nur Rand, kein dunkler Overlay -->
           <div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;pointer-events:none">
-            <div style="width:85%;height:55%;border:2px solid rgba(255,220,0,0.8);border-radius:6px;box-shadow:0 0 0 2000px rgba(0,0,0,0.35)"></div>
+            <div style="width:85%;height:55%;border:2px solid rgba(255,220,0,0.9);border-radius:6px"></div>
           </div>
           <div id="pieper-overlay" style="position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;background:rgba(0,0,0,0.65);color:#fff;font-size:0.85rem">
             <div style="font-size:2rem;margin-bottom:0.4rem">📷</div>
             <div>Antippen zum Aktivieren</div>
           </div>
-          <div id="pieper-hint" style="display:none;position:absolute;bottom:0.5rem;left:0;right:0;text-align:center;color:rgba(255,255,220,0.9);font-size:0.75rem">Antippen zum Scannen</div>
+          <div id="pieper-hint" style="display:none;position:absolute;bottom:0.5rem;left:0;right:0;text-align:center;color:rgba(255,255,220,0.9);font-size:0.75rem;text-shadow:0 1px 3px rgba(0,0,0,0.8)">Antippen zum Scannen</div>
         </div>
         <div style="display:flex;gap:0.5rem;margin-top:0.5rem;align-items:center">
           <div id="scan-scans" style="display:flex;gap:0.4rem;flex-wrap:wrap;flex:1"></div>

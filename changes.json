@@ -1,1 +1,1 @@
-[{"version": "20260318094047", "datum": "18.03.2026", "punkte": ["NEU: Zur\u00fcck-Button merkt sich Herkunftsseite", "Fix: Fokus-Delay beim Scannen (800ms)"]}]
+[{"version": "20260318094538", "datum": "18.03.2026", "punkte": ["NEU: Tap-to-Focus via CameraX (echter Fokus-Callback)", "Fix: Wartezeit entfernt"]}]

@@ -2912,9 +2912,7 @@ window.piperVideoTippen = (event) => {
       if (!ergebnis) return;
 
       // An bestehenden Text anhängen
-      const existing = ergebnis.value ? ergebnis.value + '
----
-' : '';
+      const existing = ergebnis.value ? ergebnis.value + '\n---\n' : '';
       ergebnis.value = existing + (text || 'Kein Text erkannt.');
       ergebnis.style.display = 'block';
 

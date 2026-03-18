@@ -1047,15 +1047,15 @@ registerPage('uebung-form', async (el, {id, typ: vorTyp, alarm: mitAlarm}) => {
       </div>
       <div class="card" id="pieper-scanner-card">
         <div style="font-size:0.8rem;font-weight:600;color:var(--muted);margin-bottom:0.5rem">📟 PIEPER SCANNEN (optional)</div>
-        <div style="position:relative;background:#000;border-radius:8px;overflow:hidden;aspect-ratio:4/3;cursor:pointer" onclick="piperVideoTippen(event)">
-          <video id="pieper-video" autoplay playsinline muted style="width:100%;height:100%;object-fit:cover"></video>
-          <!-- Ausschnitt-Rahmen: nur Rand, kein dunkler Overlay -->
-          <div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;pointer-events:none">
-            <div style="width:85%;height:55%;border:2px solid rgba(255,220,0,0.9);border-radius:6px"></div>
-          </div>
-          <div id="pieper-overlay" style="position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;background:rgba(0,0,0,0.65);color:#fff;font-size:0.85rem">
+        <div id="pieper-viewfinder" style="position:relative;background:#111;border-radius:8px;overflow:hidden;aspect-ratio:4/3;cursor:pointer" onclick="piperVideoTippen(event)">
+          <!-- Java legt CameraX-PreviewView hier drüber -->
+          <div id="pieper-overlay" style="position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;background:rgba(0,0,0,0.75);color:#fff;font-size:0.85rem">
             <div style="font-size:2rem;margin-bottom:0.4rem">📷</div>
             <div>Antippen zum Aktivieren</div>
+          </div>
+          <!-- Ausschnitt-Rahmen (sichtbar wenn Kamera läuft) -->
+          <div id="pieper-frame" style="display:none;position:absolute;inset:0;pointer-events:none;display:flex;align-items:center;justify-content:center">
+            <div style="width:85%;height:55%;border:2px solid rgba(255,220,0,0.9);border-radius:6px"></div>
           </div>
           <div id="pieper-hint" style="display:none;position:absolute;bottom:0.5rem;left:0;right:0;text-align:center;color:rgba(255,255,220,0.9);font-size:0.75rem;text-shadow:0 1px 3px rgba(0,0,0,0.8)">Antippen zum Scannen</div>
         </div>
@@ -1063,7 +1063,7 @@ registerPage('uebung-form', async (el, {id, typ: vorTyp, alarm: mitAlarm}) => {
           <div id="scan-scans" style="display:flex;gap:0.4rem;flex-wrap:wrap;flex:1"></div>
           <button class="btn btn-secondary btn-sm" id="scan-stop-btn" onclick="piperStoppen()" style="display:none">⏹ Stop</button>
         </div>
-        <button class="btn btn-secondary btn-sm btn-full" id="scan-auslesen-btn" onclick="piperAuslesen()" style="display:none;margin-top:0.4rem">🔍 Text auslesen</button>
+        <div id="scan-auslesen-btn" style="display:none"></div> <!-- placeholder, nicht mehr benötigt -->
         <div id="scan-loading" style="display:none;text-align:center;padding:0.5rem;font-size:0.8rem;color:var(--muted)">⏳ Lese Text aus…</div>
         <textarea id="scan-ergebnis" style="display:none;width:100%;margin-top:0.5rem;background:var(--panel2);border:1px solid var(--border);border-radius:8px;padding:0.6rem;font-size:0.8rem;color:var(--text);font-family:monospace;resize:vertical;min-height:80px" readonly placeholder="Erkannter Text erscheint hier…"></textarea>
       </div>`;
@@ -2822,6 +2822,252 @@ window.pruefaufgabeLoeschen = async (id) => {
 };
 
 // ── Pieper-Scanner ────────────────────────────────────────
+let _piperAktiv = false;
+let _piperScans  = [];
+
+window.piperCleanup = () => {
+  if (_piperAktiv) {
+    if (typeof PieperScan !== 'undefined') PieperScan.stopCamera();
+    _piperAktiv = false;
+  }
+  _piperScans = [];
+  const scans = document.getElementById('scan-scans');
+  if (scans) scans.innerHTML = '';
+  const btn = document.getElementById('scan-auslesen-btn');
+  if (btn) btn.style.display = 'none';
+  const ergebnis = document.getElementById('scan-ergebnis');
+  if (ergebnis) ergebnis.style.display = 'none';
+  const overlay = document.getElementById('pieper-overlay');
+  if (overlay) overlay.style.display = 'flex';
+  const frame = document.getElementById('pieper-frame');
+  if (frame) frame.style.display = 'none';
+  const hint = document.getElementById('pieper-hint');
+  if (hint) hint.style.display = 'none';
+  const stopBtn = document.getElementById('scan-stop-btn');
+  if (stopBtn) stopBtn.style.display = 'none';
+};
+
+// navigate() Hook für Cleanup
+const _origNavigate = window.navigate;
+if (_origNavigate) {
+  window.navigate = function(page, params = {}) {
+    piperCleanup();
+    return _origNavigate(page, params);
+  };
+}
+
+window.piperKameraStarten = () => {
+  if (typeof PieperScan === 'undefined') {
+    fw.toast('Nur in der nativen App verfügbar', true);
+    return;
+  }
+  // Position des Viewfinders ermitteln und an Java übergeben
+  const vf = document.getElementById('pieper-viewfinder');
+  const rect = vf.getBoundingClientRect();
+  PieperScan.startCamera(
+    Math.round(rect.left),
+    Math.round(rect.top),
+    Math.round(rect.width),
+    Math.round(rect.height)
+  );
+  // Callback wenn Kamera bereit
+  window.__pieperCameraReady = () => {
+    _piperAktiv = true;
+    const overlay = document.getElementById('pieper-overlay');
+    if (overlay) overlay.style.display = 'none';
+    const frame = document.getElementById('pieper-frame');
+    if (frame) frame.style.display = 'flex';
+    const hint = document.getElementById('pieper-hint');
+    if (hint) { hint.style.display = 'block'; hint.textContent = 'Antippen zum Fokussieren & Scannen'; }
+    const stopBtn = document.getElementById('scan-stop-btn');
+    if (stopBtn) stopBtn.style.display = 'block';
+  };
+  window.__pieperCameraError = (msg) => {
+    fw.toast('Kamera-Fehler: ' + msg, true);
+  };
+};
+
+window.piperVideoTippen = (event) => {
+  if (!_piperAktiv) {
+    piperKameraStarten();
+    return;
+  }
+  // Tap-Koordinaten relativ zum Viewfinder
+  const vf   = document.getElementById('pieper-viewfinder');
+  const rect = vf.getBoundingClientRect();
+  const x = (event.clientX - rect.left) / rect.width;
+  const y = (event.clientY - rect.top)  / rect.height;
+
+  const hint = document.getElementById('pieper-hint');
+  if (hint) hint.textContent = '🔍 Fokussiert…';
+
+  const cbId = 'f' + Date.now();
+  window.__pieperFocusDone = (callbackId, success) => {
+    if (hint) hint.textContent = 'Antippen zum Fokussieren & Scannen';
+    // Direkt nach Fokus aufnehmen
+    const scanCbId = 's' + Date.now();
+    window.__pieperScanResult = (id, text, error) => {
+      if (error) { fw.toast('Scan-Fehler: ' + error, true); return; }
+      const ergebnis = document.getElementById('scan-ergebnis');
+      if (!ergebnis) return;
+
+      // An bestehenden Text anhängen
+      const existing = ergebnis.value ? ergebnis.value + '
+---
+' : '';
+      ergebnis.value = existing + (text || 'Kein Text erkannt.');
+      ergebnis.style.display = 'block';
+
+      // Scan-Counter im Thumbnail zeigen
+      _piperScans.push(text);
+      const nr = _piperScans.length;
+      const scans = document.getElementById('scan-scans');
+      if (scans) {
+        const chip = document.createElement('div');
+        chip.style.cssText = 'background:var(--green);color:#000;border-radius:4px;padding:0.1rem 0.4rem;font-size:11px;font-weight:600';
+        chip.textContent = '✓' + nr;
+        scans.appendChild(chip);
+      }
+    };
+    PieperScan.capture(scanCbId);
+  };
+  PieperScan.setFocusPoint(x, y, cbId);
+};
+
+window.piperStoppen = () => {
+  piperCleanup();
+};
+
+
+window.pruefDatumAktualisieren = async (id) => {
+  if (!confirm('Prüfung heute als durchgeführt markieren?')) return;
+  await fw.setDoc('pruefaufgaben/'+id, { letztesPruefDatum: new Date() });
+  fw.toast('Prüfung aktualisiert ✅');
+  ladePruefaufgabenInline();
+};
+
+// ── Fahrzeug Form ─────────────────────────────────────────
+registerPage('fahrzeug-form', async (el, {id}) => {
+  if (!fw.isWehrfuehrer()) { el.innerHTML = '<div class="empty">Keine Berechtigung</div>'; return; }
+  fw.setTitle(id ? 'Fahrzeug bearbeiten' : 'Neues Fahrzeug');
+  fw.showBack(() => navigateBack());
+
+  let fahrzeug = null;
+  if (id) {
+    const snap = await fw.getDoc('fahrzeuge/'+id);
+    if (snap.exists()) fahrzeug = {id, ...snap.data()};
+  }
+
+  // Ortswehren für Dropdown laden
+  const wehrSnap = await fw.getDocs('ortswehren', fw.orderBy('name','asc'));
+  const wehren = wehrSnap.docs.map(d => ({id:d.id,...d.data()}));
+
+  el.innerHTML = `
+    <div class="card">
+      <div class="form-row">
+        <label>Fahrzeugkennung (z.B. 1/48/6)</label>
+        <input id="fz-name" value="${fahrzeug?.name||''}">
+      </div>
+      <div class="form-row">
+        <label>Bezeichnung (z.B. ZF-16)</label>
+        <input id="fz-bez" value="${fahrzeug?.bezeichnung||''}">
+      </div>
+      <div class="form-row">
+        <label>Ortswehr</label>
+        <select id="fz-wehr">
+          <option value="">– Bitte wählen –</option>
+          ${wehren.map(w => `<option value="${w.id}" ${fahrzeug?.ortswehrId===w.id?'selected':''}>${w.name}</option>`).join('')}
+        </select>
+      </div>
+      <div class="btn-row" style="margin-top:0.5rem">
+        <button class="btn btn-primary" onclick="fahrzeugSpeichern('${id||''}')">💾 Speichern</button>
+        ${id ? `<button class="btn btn-danger" onclick="fahrzeugLoeschen('${id}')">🗑 Löschen</button>` : ''}
+      </div>
+    </div>
+  `;
+});
+
+window.fahrzeugSpeichern = async (id) => {
+  const name = document.getElementById('fz-name').value.trim();
+  const bez  = document.getElementById('fz-bez').value.trim();
+  const wehr = document.getElementById('fz-wehr').value;
+  if (!name) { fw.toast('Fahrzeugkennung fehlt', true); return; }
+  const data = { name, bezeichnung: bez, ortswehrId: wehr || null };
+  if (id) { await fw.setDoc('fahrzeuge/'+id, data); }
+  else    { await fw.addDoc('fahrzeuge', data); }
+  fw.toast('Gespeichert ✅');
+  navigate('dienste');
+};
+
+window.fahrzeugLoeschen = async (id) => {
+  if (!confirm('Fahrzeug wirklich löschen? Zugehörige Aufgaben bleiben erhalten.')) return;
+  await fw.deleteDoc('fahrzeuge/'+id);
+  fw.toast('Gelöscht');
+  navigate('dienste');
+};
+
+// ── Prüfaufgabe Form ──────────────────────────────────────
+registerPage('pruefaufgabe-form', async (el, {id, fahrzeugId: vorFahrzeugId}) => {
+  if (!fw.isWehrfuehrer()) { el.innerHTML = '<div class="empty">Keine Berechtigung</div>'; return; }
+  fw.setTitle(id ? 'Aufgabe bearbeiten' : 'Neue Aufgabe');
+  fw.showBack(() => navigateBack());
+
+  let aufgabe = null;
+  if (id) {
+    const snap = await fw.getDoc('pruefaufgaben/'+id);
+    if (snap.exists()) aufgabe = {id, ...snap.data()};
+  }
+
+  const letztesDatum = aufgabe?.letztesPruefDatum
+    ? (aufgabe.letztesPruefDatum.toDate ? aufgabe.letztesPruefDatum.toDate() : new Date(aufgabe.letztesPruefDatum)).toISOString().split('T')[0]
+    : '';
+
+  const fzSnap = await fw.getDocs('fahrzeuge', fw.orderBy('name','asc'));
+  const fahrzeuge = fzSnap.docs.map(d => ({id:d.id,...d.data()}));
+  const aktivFahrzeugId = aufgabe?.fahrzeugId || vorFahrzeugId || '';
+
+  el.innerHTML = `
+    <div class="card">
+      <div class="form-row">
+        <label>Fahrzeug</label>
+        <select id="pa-fz">
+          <option value="">– Bitte wählen –</option>
+          ${fahrzeuge.map(f => `<option value="${f.id}" ${aktivFahrzeugId===f.id?'selected':''}>${f.name}${f.bezeichnung?' ('+f.bezeichnung+')':''}</option>`).join('')}
+        </select>
+      </div>
+      <div class="form-row"><label>Bezeichnung</label><input id="pa-bez" value="${aufgabe?.bezeichnung||''}"></div>
+      <div class="form-row"><label>Intervall (Monate)</label><input id="pa-int" type="number" min="1" value="${aufgabe?.intervall||''}"></div>
+      <div class="form-row"><label>Letztes Prüfdatum</label><input id="pa-dat" type="date" value="${letztesDatum}"></div>
+      <div class="btn-row" style="margin-top:0.5rem">
+        <button class="btn btn-primary" onclick="pruefaufgabeSpeichern('${id||''}')">💾 Speichern</button>
+        ${id ? `<button class="btn btn-danger" onclick="pruefaufgabeLoeschen('${id}')">🗑 Löschen</button>` : ''}
+      </div>
+    </div>
+  `;
+});
+
+window.pruefaufgabeSpeichern = async (id) => {
+  const fzId = document.getElementById('pa-fz').value;
+  const bez  = document.getElementById('pa-bez').value.trim();
+  const int  = parseInt(document.getElementById('pa-int').value) || null;
+  const datStr = document.getElementById('pa-dat').value;
+  if (!bez) { fw.toast('Bezeichnung fehlt', true); return; }
+  if (!fzId) { fw.toast('Fahrzeug fehlt', true); return; }
+  const data = { bezeichnung: bez, intervall: int, fahrzeugId: fzId, letztesPruefDatum: datStr ? new Date(datStr) : null };
+  if (id) { await fw.setDoc('pruefaufgaben/'+id, data); }
+  else    { await fw.addDoc('pruefaufgaben', data); }
+  fw.toast('Gespeichert ✅');
+  navigate('dienste');
+};
+
+window.pruefaufgabeLoeschen = async (id) => {
+  if (!confirm('Aufgabe wirklich löschen?')) return;
+  await fw.deleteDoc('pruefaufgaben/'+id);
+  fw.toast('Gelöscht');
+  navigate('dienste');
+};
+
+// ── Pieper-Scanner ────────────────────────────────────────
 let _piperStream = null;
 let _piperScans  = []; // Array von base64-Strings
 
@@ -2849,56 +3095,6 @@ if (_origNavigate) {
     return _origNavigate(page, params);
   };
 }
-
-window.piperKameraStarten = async () => {
-  try {
-    _piperStream = await navigator.mediaDevices.getUserMedia({
-      video: {
-        facingMode: 'environment',
-        width: { ideal: 1920 },
-        height: { ideal: 1080 },
-        advanced: [{ focusMode: 'continuous' }]
-      }
-    });
-    const video = document.getElementById('pieper-video');
-    video.srcObject = _piperStream;
-    document.getElementById('pieper-overlay').style.display = 'none';
-    document.getElementById('pieper-hint').style.display = 'block';
-    document.getElementById('scan-stop-btn').style.display = 'block';
-  } catch(e) {
-    fw.toast('Kamera nicht verfügbar: ' + e.message, true);
-  }
-};
-
-// Antippen: Kamera starten ODER Tap-to-Focus via Java dann Scan
-window.piperVideoTippen = (event) => {
-  if (!_piperStream) {
-    piperKameraStarten();
-    return;
-  }
-
-  // Tap-Koordinaten relativ zum Video-Element berechnen
-  const video = document.getElementById('pieper-video');
-  const rect  = video.getBoundingClientRect();
-  const x = (event.clientX - rect.left)  / rect.width;
-  const y = (event.clientY - rect.top)   / rect.height;
-
-  const hint = document.getElementById('pieper-hint');
-
-  // Native Tap-to-Focus verfügbar?
-  if (typeof PieperScan !== 'undefined' && PieperScan.setFocusPoint) {
-    if (hint) hint.textContent = '🔍 Fokussiert…';
-    const cbId = 'f' + Date.now();
-    window.__pieperFocusDone = (callbackId, success) => {
-      if (hint) hint.textContent = 'Antippen zum Scannen';
-      piperScan();
-    };
-    PieperScan.setFocusPoint(x, y, cbId);
-  } else {
-    // Fallback: direkt scannen
-    piperScan();
-  }
-};
 
 window.piperScan = () => {
   const video = document.getElementById('pieper-video');
@@ -2954,40 +3150,3 @@ window.piperStoppen = () => {
   if (stopBtn) stopBtn.style.display = 'none';
 };
 
-window.piperAuslesen = () => {
-  if (!_piperScans.length) return;
-
-  const loading  = document.getElementById('scan-loading');
-  const ergebnis = document.getElementById('scan-ergebnis');
-  const btn      = document.getElementById('scan-auslesen-btn');
-
-  // Nur in der nativen App verfügbar
-  if (typeof PieperScan === 'undefined') {
-    fw.toast('Nur in der nativen App verfügbar', true);
-    return;
-  }
-
-  btn.disabled = true;
-  loading.style.display = 'block';
-  ergebnis.style.display = 'none';
-
-  // Ergebnisse sammeln – Java ruft __pieperScanResult für jeden Scan auf
-  const ergebnisTexte = new Array(_piperScans.length);
-  let fertig = 0;
-
-  window.__pieperScanResult = (callbackId, text, error) => {
-    const idx = parseInt(callbackId);
-    ergebnisTexte[idx] = error ? '[Fehler: ' + error + ']' : (text || '');
-    fertig++;
-    if (fertig === _piperScans.length) {
-      loading.style.display = 'none';
-      btn.disabled = false;
-      const gesamt = ergebnisTexte.join('\n---\n').trim();
-      ergebnis.value = gesamt || 'Kein Text erkannt.';
-      ergebnis.style.display = 'block';
-    }
-  };
-
-  // Jeden Scan an ML Kit schicken
-  _piperScans.forEach((b64, i) => PieperScan.scanBase64(b64, String(i)));
-};

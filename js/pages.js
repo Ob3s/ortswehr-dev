@@ -1028,6 +1028,23 @@ registerPage('uebung-form', async (el, {id, typ: vorTyp, alarm: mitAlarm}) => {
     const jetztM  = new Date().getMinutes().toString().padStart(2,'0');
     const jetztZeit = `${jetztH}:${jetztM}`;
     el.innerHTML = `
+      <div class="card" id="pieper-scanner-card">
+        <div style="font-size:0.8rem;font-weight:600;color:var(--muted);margin-bottom:0.5rem">📟 PIEPER SCANNEN (optional)</div>
+        <div style="position:relative;background:#000;border-radius:8px;overflow:hidden;aspect-ratio:16/9">
+          <video id="pieper-video" autoplay playsinline muted style="width:100%;height:100%;object-fit:cover"></video>
+          <div id="pieper-overlay" style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,0.6);color:#fff;font-size:0.85rem;cursor:pointer" onclick="piperKameraStarten()">
+            📷 Kamera aktivieren
+          </div>
+        </div>
+        <div style="display:flex;gap:0.5rem;margin-top:0.5rem">
+          <button class="btn btn-secondary btn-sm" style="flex:1" id="scan-btn" onclick="piperScan()" disabled>📸 Scan</button>
+          <button class="btn btn-secondary btn-sm" style="flex:1" id="scan-stop-btn" onclick="piperStoppen()" disabled>⏹ Stop</button>
+        </div>
+        <div id="scan-scans" style="display:flex;gap:0.4rem;flex-wrap:wrap;margin-top:0.5rem"></div>
+        <button class="btn btn-secondary btn-sm btn-full" id="scan-auslesen-btn" onclick="piperAuslesen()" style="display:none;margin-top:0.4rem">🔍 Text auslesen</button>
+        <div id="scan-loading" style="display:none;text-align:center;padding:0.5rem;font-size:0.8rem;color:var(--muted)">⏳ Lese Text aus…</div>
+        <textarea id="scan-ergebnis" style="display:none;width:100%;margin-top:0.5rem;background:var(--panel2);border:1px solid var(--border);border-radius:8px;padding:0.6rem;font-size:0.8rem;color:var(--text);font-family:monospace;resize:vertical;min-height:80px" readonly placeholder="Erkannter Text erscheint hier…"></textarea>
+      </div>
       <div class="card">
         <div style="font-family:'DM Serif Display',serif;font-size:1.3rem;color:var(--red);margin-bottom:1rem">🚨 Einsatz</div>
         <div class="form-row">
@@ -2804,4 +2821,107 @@ window.pruefaufgabeLoeschen = async (id) => {
   await fw.deleteDoc('pruefaufgaben/'+id);
   fw.toast('Gelöscht');
   navigate('dienste');
+};
+
+// ── Pieper-Scanner ────────────────────────────────────────
+let _piperStream = null;
+let _piperScans  = []; // Array von base64-Strings
+
+window.piperKameraStarten = async () => {
+  try {
+    _piperStream = await navigator.mediaDevices.getUserMedia({
+      video: { facingMode: 'environment', width: { ideal: 1920 }, height: { ideal: 1080 } }
+    });
+    const video = document.getElementById('pieper-video');
+    video.srcObject = _piperStream;
+    document.getElementById('pieper-overlay').style.display = 'none';
+    document.getElementById('scan-btn').disabled = false;
+    document.getElementById('scan-stop-btn').disabled = false;
+  } catch(e) {
+    fw.toast('Kamera nicht verfügbar: ' + e.message, true);
+  }
+};
+
+window.piperScan = () => {
+  const video = document.getElementById('pieper-video');
+  if (!video.srcObject) return;
+
+  // Frame aus Video als JPEG extrahieren
+  const canvas = document.createElement('canvas');
+  canvas.width  = video.videoWidth;
+  canvas.height = video.videoHeight;
+  canvas.getContext('2d').drawImage(video, 0, 0);
+  const b64 = canvas.toDataURL('image/jpeg', 0.92).split(',')[1];
+  _piperScans.push(b64);
+
+  // Thumbnail anzeigen
+  const nr = _piperScans.length;
+  const thumb = document.createElement('div');
+  thumb.style.cssText = 'position:relative;width:60px;height:40px;border-radius:4px;overflow:hidden;border:2px solid var(--green)';
+  thumb.innerHTML = `<img src="data:image/jpeg;base64,${b64}" style="width:100%;height:100%;object-fit:cover">
+    <div style="position:absolute;bottom:0;right:2px;font-size:9px;color:#fff;font-weight:600">${nr}</div>`;
+  document.getElementById('scan-scans').appendChild(thumb);
+
+  // Auslesen-Button einblenden
+  const auslesenBtn = document.getElementById('scan-auslesen-btn');
+  auslesenBtn.style.display = 'block';
+  auslesenBtn.textContent = `🔍 Text auslesen (${nr} Bild${nr !== 1 ? 'er' : ''})`;
+  fw.toast(`Scan ${nr} gespeichert`);
+};
+
+window.piperStoppen = () => {
+  if (_piperStream) {
+    _piperStream.getTracks().forEach(t => t.stop());
+    _piperStream = null;
+  }
+  document.getElementById('pieper-overlay').style.display = 'flex';
+  document.getElementById('pieper-overlay').textContent = '📷 Kamera aktivieren';
+  document.getElementById('scan-btn').disabled = true;
+  document.getElementById('scan-stop-btn').disabled = true;
+};
+
+window.piperAuslesen = async () => {
+  if (!_piperScans.length) return;
+
+  const loading  = document.getElementById('scan-loading');
+  const ergebnis = document.getElementById('scan-ergebnis');
+  const btn      = document.getElementById('scan-auslesen-btn');
+
+  btn.disabled = true;
+  loading.style.display = 'block';
+  ergebnis.style.display = 'none';
+
+  try {
+    // Alle Bilder als content-Blöcke aufbauen
+    const imageBlocks = _piperScans.map((b64, i) => ([
+      {
+        type: 'text',
+        text: _piperScans.length > 1 ? `Bild ${i+1} von ${_piperScans.length}:` : 'Pieper-Anzeige:'
+      },
+      {
+        type: 'image',
+        source: { type: 'base64', media_type: 'image/jpeg', data: b64 }
+      }
+    ])).flat();
+
+    const res = await fetch('https://europe-west3-ffw-oegeln-791ca.cloudfunctions.net/pieperscan', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-uid': fw.user.uid,
+      },
+      body: JSON.stringify({ images: _piperScans })
+    });
+
+    const data = await res.json();
+    const text = data.text || 'Kein Text erkannt.';
+
+    ergebnis.value = text;
+    ergebnis.style.display = 'block';
+  } catch(e) {
+    fw.toast('Fehler beim Auslesen: ' + e.message, true);
+  } finally {
+    loading.style.display = 'none';
+    btn.disabled = false;
+  }
 };

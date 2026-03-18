@@ -686,7 +686,7 @@ registerPage('dienste', async (el) => {
     </div>` : ''}
     ${(fw.isWehrfuehrer() || istMaschinist) ? `
     <details class="card" style="margin-top:0.8rem;padding:0">
-      <summary style="font-weight:600;cursor:pointer;list-style:none;display:flex;align-items:center;justify-content:space-between;padding:0.4rem 0.75rem">
+      <summary style="font-weight:600;cursor:pointer;list-style:none;display:flex;align-items:center;justify-content:space-between;padding:0.35rem 0.75rem;font-size:0.9rem">
         <span>🔧 Fahrzeug- und Geräteprüfungen</span>
         <span style="color:var(--muted)">▾</span>
       </summary>
@@ -901,7 +901,7 @@ registerPage('uebung-detail', async (el, {id, typ}) => {
         const alle = snap.docs.map(d => {
           const a = {id:d.id,...d.data()};
           const profil = usersMap.get(a.userId) || {};
-          a.rolle         = profil.staerkeRolle || profil['stärkeRolle'] || profil.rolle || a.rolle || 'kamerad';
+          a.rolle         = profil.staerkeRolle || profil.rolle || a.rolle || 'kamerad';
           a.fuehrerschein = profil.fuehrerschein || a.fuehrerschein || '';
           return a;
         });

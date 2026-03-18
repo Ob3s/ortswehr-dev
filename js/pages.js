@@ -1045,3 +1045,1887 @@ registerPage('uebung-form', async (el, {id, typ: vorTyp, alarm: mitAlarm}) => {
           <input id="f-ende" type="time" value="${u?.zeitEnde||''}" placeholder="Ende (optional)" style="flex:1">
         </div>
       </div>
+`;
+    requestAnimationFrame(() => setTimeout(() => initOrtAutocomplete('f-ort'), 50));
+  } else {
+    // Dienst: vollständiges Formular
+    el.innerHTML = `
+      <div class="card">
+        <div class="form-row"><label>Titel</label>
+          <input id="f-titel" value="${u?.titel||''}" placeholder="Monatsübung April…">
+        </div>
+        <div class="form-row"><label>Datum</label><input id="f-datum" type="date" value="${datumVal}"></div>
+        <div class="form-row"><label>Beginn</label><input id="f-beginn" type="time" value="${u?.zeitBeginn||''}" oninput="berechneDauer()"></div>
+        <div class="form-row"><label>Ende</label><input id="f-ende" type="time" value="${u?.zeitEnde||''}" oninput="berechneDauer()"></div>
+        <div class="form-row"><label>Dauer (Stunden)</label>
+          <input id="f-dauer" type="number" step="0.5" min="0.5" value="${u?.dauer_h||2}">
+        </div>
+        <div class="form-row"><label>Beschreibung (optional)</label>
+          <textarea id="f-beschr">${u?.beschreibung||''}</textarea>
+        </div>
+        <div class="form-row"><label>Ort (optional)</label>
+          <input id="f-ort" value="${u?.ort||''}" placeholder="Gerätehaus Oegeln">
+        </div>
+        <div class="btn-row">
+          <button class="btn btn-primary" onclick="uebungSpeichern('${id||''}','dienst')">💾 Speichern & Benachrichtigen</button>
+          ${u ? `<button class="btn btn-danger" onclick="uebungLoeschen('${id}','dienst')">🗑 Löschen</button>` : ''}
+        </div>
+      </div>`;
+  }
+});
+
+window.berechneDauer = () => {
+  const b = document.getElementById('f-beginn')?.value;
+  const e = document.getElementById('f-ende')?.value;
+  if (!b || !e) return;
+  const [bh, bm] = b.split(':').map(Number);
+  const [eh, em] = e.split(':').map(Number);
+  const diff = (eh * 60 + em) - (bh * 60 + bm);
+  if (diff > 0) document.getElementById('f-dauer').value = Math.round(diff / 60 * 100) / 100;
+};
+
+window.uebungSpeichern = async (id, forcTyp) => {
+  piperCleanup();
+  const titel   = document.getElementById('f-titel').value.trim();
+  let dauer_h = parseFloat(document.getElementById('f-dauer')?.value) || 0;
+  const typ     = forcTyp === 'einsatz' ? 'einsatz' : 'dienst';
+  const isEinsatz = typ === 'einsatz';
+
+  const datumStr = isEinsatz
+    ? new Date().toISOString().slice(0,10)
+    : (document.getElementById('f-datum')?.value || new Date().toISOString().slice(0,10));
+  const beschr     = document.getElementById('f-beschr')?.value?.trim() || '';
+  const zeitBeginn = document.getElementById('f-beginn')?.value || null;
+  const zeitEnde   = document.getElementById('f-ende')?.value || null;
+
+  // Dauer aus Zeiten berechnen wenn vorhanden
+  if (isEinsatz && zeitBeginn && zeitEnde) {
+    const [bh, bm] = zeitBeginn.split(':').map(Number);
+    const [eh, em] = zeitEnde.split(':').map(Number);
+    dauer_h = Math.round(((eh*60+em) - (bh*60+bm)) / 60 * 100) / 100;
+  }
+
+  if (!titel) { fw.toast('Stichwort erforderlich', true); return; }
+
+  const ort = document.getElementById('f-ort')?.value?.trim() || null;
+  const data = { titel, datum: new Date(datumStr), typ, dauer_h, beschreibung: beschr, zeitBeginn, zeitEnde, ort };
+  const isNeu = !id;
+  try {
+    let uebungId = id;
+    if (id) {
+      await fw.updateDoc(col(typ)+'/'+id, data);
+    } else {
+      const ref = await fw.addDoc(col(typ), {...data, erstelltVon: fw.user.uid, erstelltAm: new Date()});
+      uebungId = ref.id;
+    }
+    const mitAlarmFlag = document.getElementById('f-alarm')?.value === '1';
+  if (isNeu && mitAlarmFlag) await benachrichtigeOrtswehr(typ, titel, datumStr, dauer_h, uebungId);
+  else if (isNeu && !mitAlarmFlag && typ === 'dienst') await benachrichtigeOrtswehr(typ, titel, datumStr, dauer_h, uebungId);
+    fw.toast(isEinsatz ? 'Einsatz gemeldet 🚨' : 'Gespeichert ✅');
+    navigate(typ === 'einsatz' ? 'einsaetze' : 'dienste');
+  } catch(e) { fw.toast(e.message, true); }
+};
+
+// Profil-Ansicht: sortierte Lehrgänge ohne Bearbeiten-Button
+function renderQualisProfil(qualis, me) {
+  if (!qualis.length) return '<p class="muted" style="font-size:0.85rem">Keine eingetragen</p>';
+  const QUALI_REIHENFOLGE = ['Truppmann','Sprechfunk','AGT','TH-Grund','Maschinist','Absturzsicherung','ABC-Grund','Truppführer','Gruppenführer','Zugführer','Wehrführer','Erste-Hilfe','Motorsäge A/B','Motorsäge C/D'];
+  const qualiIdx = (bez) => { const i = QUALI_REIHENFOLGE.findIndex(r => r.toLowerCase() === (bez||'').trim().toLowerCase()); return i < 0 ? 99 : i; };
+  const trennerIdx = QUALI_REIHENFOLGE.indexOf('Wehrführer');
+  const sorted = [...qualis].sort((a,b) => qualiIdx(a.bezeichnung) - qualiIdx(b.bezeichnung));
+  let html = '', trennerGezeigt = false;
+  for (const q of sorted) {
+    const istErsterNachTrenner = !trennerGezeigt && qualiIdx(q.bezeichnung) > trennerIdx;
+    if (istErsterNachTrenner) trennerGezeigt = true;
+    let badge = '';
+    if ((q.bezeichnung||'').trim().toLowerCase() === 'erste-hilfe' && q.datum) {
+      const ablauf = new Date(q.datum?.toDate ? q.datum.toDate() : q.datum);
+      ablauf.setFullYear(ablauf.getFullYear() + 2);
+      const heute = new Date();
+      const baldAblaufend = new Date(); baldAblaufend.setMonth(heute.getMonth() + 3);
+      if (ablauf < heute) {
+        badge = ` <span style="color:#ef4444;font-size:0.75rem">⚠️ abgelaufen</span>`;
+      } else if (ablauf < baldAblaufend) {
+        badge = ` <span style="color:#f59e0b;font-size:0.75rem">⚠️ läuft ab ${datum(ablauf)}</span>`;
+      } else {
+        badge = ` <span style="color:#22c55e;font-size:0.75rem">✅ bis ${datum(ablauf)}</span>`;
+      }
+    }
+    html += `<div class="list-item" style="border-bottom:1px solid var(--border);${istErsterNachTrenner?'margin-top:0':''}">
+      <div class="list-item-body">
+        <div class="list-item-title">${q.bezeichnung}${badge}</div>
+        <div class="list-item-sub">${q.datum?datum(q.datum):'Kein Datum'}${q.bemerkung?' · '+q.bemerkung:''}</div>
+      </div>
+    </div>`;
+  }
+  return html;
+}
+
+window.ortSpeichern = async (einsatzId) => {
+  const ort = document.getElementById('ort-inline')?.value?.trim();
+  if (!ort) { fw.toast('Bitte Adresse eingeben', true); return; }
+  await fw.updateDoc('einsaetze/'+einsatzId, { ort });
+  fw.toast('Adresse gespeichert 📍'); navigate('uebung-detail', {id: einsatzId, typ: 'einsatz'});
+};
+
+window.uebungLoeschen = async (id, typ) => {
+  if (!confirm('Wirklich löschen?')) return;
+  await fw.deleteDoc(col(typ)+'/'+id);
+  fw.toast('Gelöscht'); navigate(typ === 'einsatz' ? 'einsaetze' : 'dienste');
+};
+
+// ── Push ──────────────────────────────────────────────────
+async function benachrichtigeOrtswehr(typ, titel, datumStr, dauer_h, uebungId) {
+  const ortswehrId = fw.profil.ortswehrId;
+  if (!ortswehrId) {
+    fw.toast('⚠️ Keine Ortswehr zugeordnet – niemand wird benachrichtigt!', true);
+    return;
+  }
+  const usersSnap = await fw.getDocs('users', fw.where('ortswehrId','==',ortswehrId));
+  const isEinsatz = typ === 'einsatz';
+  const tokens = [];
+  for (const d of usersSnap.docs) {
+    const u = d.data();
+    if (d.id === fw.user.uid && !fw.profil.notif_selbst) { console.log('Push: Selbst übersprungen'); continue; }
+    if (!u.fcmToken) { console.log('Push: Kein Token für', d.id); continue; }
+    if (isEinsatz && u.notif_einsatz !== false) tokens.push(u.fcmToken);
+    // Dienst-Push bei Anlage wurde entfernt – Erinnerung erfolgt nur noch über dienstErinnerung (08:00 Uhr)
+  }
+  if (tokens.length === 0) { fw.toast('⚠️ Keine Push-Empfänger gefunden', true); return; }
+  const title = isEinsatz ? '🚨 EINSATZ ALARM' : '🔔 Neuer Dienst';
+  const body  = isEinsatz
+    ? titel
+    : `${titel} am ${new Date(datumStr).toLocaleDateString('de-DE')} (${dauerFormat(dauer_h)}h)`;
+  await sendPush(tokens, title, body, isEinsatz, uebungId);
+}
+
+async function sendPush(tokens, title, body, alarm = false, uebungId = null) {
+  try {
+    await fw.addDoc('push_queue', {
+      tokens, title, body, alarm, uebungId,
+      erstelltAm: new Date(), erstelltVon: fw.user.uid,
+    });
+    fw.toast(alarm ? 'Alarm gesendet 🚨' : 'Benachrichtigung gesendet ✅');
+  } catch(e) {
+    fw.toast('Push Fehler: ' + e.message, true);
+  }
+}
+
+window.einsatzNachbenachrichtigen = async (id) => {
+  if (!confirm('Benachrichtigung erneut an alle senden?')) return;
+  const snap = await fw.getDoc('einsaetze/'+id);
+  if (!snap.exists()) { fw.toast('Einsatz nicht gefunden', true); return; }
+  const u = snap.data();
+  await benachrichtigeOrtswehr('einsatz', u.titel, u.datum, u.dauer_h, id);
+};
+
+// ── Deep Link ─────────────────────────────────────────────
+function checkDeepLink() {
+  const params = new URLSearchParams(window.location.search);
+  const uebungId = params.get('uebung');
+  if (uebungId) {
+    window.history.replaceState({}, '', window.location.pathname);
+    navigate('uebung-detail', { id: uebungId });
+  }
+}
+
+// ── Profil ────────────────────────────────────────────────
+registerPage('profil', async (el) => {
+  fw.setTitle('Mein Profil');
+  // Immer frisch laden damit notif-Felder aktuell sind
+  const [meSnap, qSnap, aSnap, pDiensteSnap, pEinsaetzeSnap] = await Promise.all([
+    fw.getDoc('users/'+fw.user.uid),
+    fw.getDocs('users/'+fw.user.uid+'/qualifikationen'),
+    fw.getDocs('anwesenheiten', fw.where('userId','==',fw.user.uid)),
+    fw.getDocs('dienste'),
+    fw.getDocs('einsaetze'),
+  ]);
+  const me = meSnap.data() || fw.profil;
+  Object.assign(fw.profil, me);
+  const qualis = qSnap.docs.map(d => ({id:d.id,...d.data()}));
+  const pDienstMap  = new Map(pDiensteSnap.docs.map(d => [d.id, d.data()]));
+  const pEinsatzMap = new Map(pEinsaetzeSnap.docs.map(d => [d.id, d.data()]));
+  const stats  = getStats(aSnap.docs.map(d => d.data()), pDienstMap, pEinsatzMap);
+
+  el.innerHTML = `
+    <div class="card" style="display:flex;align-items:center;gap:0.8rem;padding:0.9rem 1rem">
+      <div style="font-size:1.4rem">${stats.ziel?'✅':'⚠️'}</div>
+      <div>
+        <div style="font-weight:600;font-size:0.95rem">${stats.ziel?'40-Stunden-Ziel erreicht':'40-Stunden-Ziel nicht erreicht'}</div>
+        <div style="font-size:0.8rem;color:var(--muted);margin-top:0.1rem">${dauerFormat(stats.stunden12m)}h dieses Jahr · ${dauerFormat(stats.stunden12mZiel)}h / 40:00h (12 Mon.)</div>
+      </div>
+    </div>
+    <div class="stats-grid">
+      <div class="stat-card"><div class="stat-zahl">${dauerFormat(stats.gesamtEinsatz)}h</div><div class="stat-label">Einsatzstunden ${new Date().getFullYear()}</div></div>
+      <div class="stat-card"><div class="stat-zahl">${stats.einsaetze}</div><div class="stat-label">${stats.einsaetze===1?'Einsatz':'Einsätze'} ${new Date().getFullYear()}</div></div>
+      <div class="stat-card"><div class="stat-zahl">${dauerFormat(stats.gesamtDienst)}h</div><div class="stat-label">Dienststunden ${new Date().getFullYear()}</div></div>
+      <div class="stat-card"><div class="stat-zahl">${stats.dienste}</div><div class="stat-label">${stats.dienste===1?'Dienst':'Dienste'} ${new Date().getFullYear()}</div></div>
+    </div>
+
+    <div class="section-header">Dienstlich</div>
+    <div class="card">
+      <div style="display:flex;gap:1.2rem;flex-wrap:wrap">
+        <div><div class="muted" style="font-size:0.72rem">Dienstgrad</div><div class="bold">${me.dienstgrad||'–'}</div></div>
+        <div><div class="muted" style="font-size:0.72rem">Eingetreten</div><div class="bold">${datum(me.eintrittsdatum)||'–'}</div></div>
+        ${me.fuehrerschein ? `<div><div class="muted" style="font-size:0.72rem">Führerschein</div><div class="bold">${me.fuehrerschein}</div></div>` : ''}
+      </div>
+      <hr>
+      <div class="card-title" style="margin-bottom:0.5rem">Lehrgänge</div>
+      ${renderQualisProfil(qualis, me)}
+    </div>
+
+    <div class="section-header">Passwort ändern</div>
+    <div class="card">
+      <div class="form-row"><label>Aktuelles Passwort</label><input id="pw-alt" type="password"></div>
+      <div class="form-row"><label>Neues Passwort</label><input id="pw-neu" type="password"></div>
+      <button class="btn btn-primary btn-full" onclick="passwortAendern()">🔒 Passwort ändern</button>
+    </div>
+    <div class="card">
+      <div style="display:flex;gap:0.5rem;margin-bottom:0.5rem">
+        <button class="btn btn-secondary btn-sm" style="flex:1" onclick="navigate('einstellungen')">Einstellungen</button>
+        <button class="btn btn-secondary btn-sm" style="flex:1" onclick="pruefeAufUpdate(true)">🔄 Updates</button>
+      </div>
+      <button class="btn btn-danger btn-full" onclick="abmelden()">Abmelden</button>
+    </div>
+  `;
+});
+
+window.themeWaehlen = async (theme) => {
+  document.body.setAttribute('data-theme', theme === 'klassisch' ? 'klassisch' : '');
+  await fw.setDoc('users/'+fw.user.uid, { theme });
+  Object.assign(fw.profil, { theme });
+  // Buttons aktualisieren
+  document.getElementById('theme-standard')?.classList.toggle('btn-primary',   theme !== 'klassisch');
+  document.getElementById('theme-standard')?.classList.toggle('btn-secondary',  theme === 'klassisch');
+  document.getElementById('theme-klassisch')?.classList.toggle('btn-primary',  theme === 'klassisch');
+  document.getElementById('theme-klassisch')?.classList.toggle('btn-secondary', theme !== 'klassisch');
+  fw.toast(theme === 'klassisch' ? '🖥️ Design: Klassisch' : '🎨 Design: Modern');
+};
+
+function initNotifCheckboxes() {
+  const p = fw.profil;
+  const e = document.getElementById('n-einsatz');
+  const u = document.getElementById('n-uebung');
+  const b = document.getElementById('n-best');
+  const s = document.getElementById('n-selbst');
+  if (e) e.checked = p.notif_einsatz !== false;
+  if (u) u.checked = p.notif_uebung !== false;
+  if (b) b.checked = p.notif_bestaetigung !== false;
+  if (s) s.checked = p.notif_selbst === true;
+  const st = document.getElementById('n-status');
+  if (st) st.checked = p.notif_status !== false;
+}
+
+window.notifSpeichern = async () => {
+  const selbstEl = document.getElementById('n-selbst');
+  const data = {
+    notif_einsatz:         document.getElementById('n-einsatz')?.checked ?? true,
+    notif_dienst_reminder: document.getElementById('n-dienst-reminder')?.checked ?? false,
+    notif_selbst:          selbstEl ? selbstEl.checked : false,
+    notif_status:          document.getElementById('n-status')?.checked ?? true,
+  };
+  await fw.setDoc('users/'+fw.user.uid, data);
+  Object.assign(fw.profil, data);
+  if (data.notif_einsatz || data.notif_dienst_reminder) {
+    const token = await fw.registerPush();
+    if (token) fw.toast('Gespeichert ✅ Push aktiv');
+    else fw.toast('Gespeichert – Push nicht verfügbar', true);
+  } else {
+    await fw.setDoc('users/'+fw.user.uid, { fcmToken: null });
+    fw.toast('Gespeichert ✅');
+  }
+};
+
+window.passwortAendern = async () => {
+  const { EmailAuthProvider, reauthenticateWithCredential, updatePassword } =
+    await import('https://www.gstatic.com/firebasejs/10.8.0/firebase-auth.js');
+  const alt = document.getElementById('pw-alt').value;
+  const neu = document.getElementById('pw-neu').value;
+  if (!alt||!neu) { fw.toast('Bitte beide Felder ausfüllen', true); return; }
+  if (neu.length < 6) { fw.toast('Mind. 6 Zeichen', true); return; }
+  try {
+    const cred = EmailAuthProvider.credential(fw.user.email, alt);
+    await reauthenticateWithCredential(fw.user, cred);
+    await updatePassword(fw.user, neu);
+    // Gespeicherte Credentials aktualisieren
+    if (typeof window.CredentialStore !== 'undefined') {
+      window.CredentialStore.save(fw.user.email, neu);
+    }
+    fw.toast('Passwort geändert ✅');
+    document.getElementById('pw-alt').value = '';
+    document.getElementById('pw-neu').value = '';
+  } catch(e) { fw.toast('Altes Passwort falsch', true); }
+};
+
+window.abmelden = async () => {
+  // Alle aktiven Firestore-Listener stoppen
+  if (window._einsatzListener)  { window._einsatzListener();  window._einsatzListener  = null; }
+  if (_newsFeedListener)        { _newsFeedListener();         _newsFeedListener        = null; }
+  // Gespeicherte Credentials löschen damit Auto-Login nicht greift
+  if (typeof window.CredentialStore !== 'undefined') window.CredentialStore.clear();
+  const { signOut } = await import('https://www.gstatic.com/firebasejs/10.8.0/firebase-auth.js');
+  await signOut(fw.auth);
+};
+
+// ── Einstellungen ─────────────────────────────────────────
+registerPage('einstellungen', async (el) => {
+  fw.setTitle('Einstellungen');
+  fw.showBack(() => navigateBack());
+
+  const isNative = typeof window.AlarmSettings !== 'undefined';
+  const aktivProfil = isNative ? window.AlarmSettings.getProfil() : 'laut';
+  const profilLabel = { laut: '🔊 Laut', leise: '🔉 Leise', stumm: '🔇 Stumm' };
+
+  // Aktuelles Profil laden für Notif-Checkboxen
+  const meSnap = await fw.getDoc('users/' + fw.user.uid);
+  const me = meSnap.data() || fw.profil;
+
+  const notifRow = (id, icon, titel, sub) => `
+    <div style="display:flex;align-items:center;gap:0.8rem;padding:0.6rem 0;border-bottom:1px solid var(--border)">
+      <div style="flex:1"><div style="font-weight:600">${icon} ${titel}</div><div class="muted" style="font-size:0.78rem">${sub}</div></div>
+      <input type="checkbox" id="${id}" style="width:24px;height:24px;accent-color:var(--red);cursor:pointer;flex-shrink:0">
+    </div>`;
+
+  const renderButtons = (aktiv) => ['laut', 'leise', 'stumm'].map(p => `
+    <button
+      class="btn ${aktiv === p ? 'btn-primary' : 'btn-secondary'}"
+      style="flex:1;min-width:0;padding:0.6rem 0.3rem;font-size:0.9rem"
+      onclick="alarmProfilSetzen('${p}')">
+      ${profilLabel[p]}
+    </button>
+  `).join('');
+
+  el.innerHTML = `
+    <div class="section-header">🔔 Benachrichtigungen</div>
+    <div class="card">
+      ${notifRow('n-einsatz', '🚨', 'Einsatzalarm', 'Bei neuen Einsätzen')}
+      ${notifRow('n-dienst-reminder', '📅', 'Diensterinnerung', 'Am Morgen des Dienstes um 08:00 Uhr')}
+      ${notifRow('n-status', '⚠️', 'Status-Warnung', 'Wenn App offline oder Push nicht bereit')}
+      ${fw.isWehrfuehrer() ? notifRow('n-selbst', '🧪', 'Selbst benachrichtigen', 'Nur für Tests – Wehrführer erhält eigene Alarme') : ''}
+      <button class="btn btn-primary btn-full" style="margin-top:0.8rem" onclick="notifSpeichern()">💾 Speichern</button>
+    </div>
+
+    <div class="section-header">🎨 Design</div>
+    <div class="card">
+      <div style="display:flex;gap:0.6rem">
+        <button id="theme-standard" onclick="themeWaehlen('standard')"
+          class="btn btn-sm ${(me.theme||'standard')==='standard'?'btn-primary':'btn-secondary'}"
+          style="flex:1">🎨 Modern</button>
+        <button id="theme-klassisch" onclick="themeWaehlen('klassisch')"
+          class="btn btn-sm ${(me.theme||'standard')==='klassisch'?'btn-primary':'btn-secondary'}"
+          style="flex:1">🖥️ Klassisch</button>
+      </div>
+    </div>
+
+    <div class="section-header">🚨 Alarm-Lautstärke</div>
+    <div class="card">
+      <div style="color:var(--muted);font-size:0.82rem;margin-bottom:0.9rem">
+        Laut = 80 % &nbsp;·&nbsp; Leise = 30 % &nbsp;·&nbsp; Stumm = kein Ton (Vibration bleibt aktiv)
+      </div>
+      <div id="alarm-profil-buttons" style="display:flex;gap:0.5rem;width:100%;box-sizing:border-box">
+        ${renderButtons(aktivProfil)}
+      </div>
+      ${!isNative ? `<div style="color:var(--muted);font-size:0.8rem;margin-top:0.8rem">
+        ⚠️ Nur in der nativen App verfügbar
+      </div>` : ''}
+    </div>
+  `;
+
+  // Checkboxen setzen
+  const cb = id => document.getElementById(id);
+  if (cb('n-einsatz'))        cb('n-einsatz').checked        = me.notif_einsatz !== false;
+  if (cb('n-dienst-reminder'))cb('n-dienst-reminder').checked = me.notif_dienst_reminder === true;
+  if (cb('n-status'))         cb('n-status').checked         = me.notif_status !== false;
+  if (cb('n-selbst'))         cb('n-selbst').checked         = me.notif_selbst === true;
+
+  window.alarmProfilSetzen = (profil) => {
+    if (!isNative) return;
+    window.AlarmSettings.setProfil(profil);
+    document.getElementById('alarm-profil-buttons').innerHTML = renderButtons(profil);
+    fw.toast(profil === 'laut' ? '🔊 Laut' : profil === 'leise' ? '🔉 Leise' : '🔇 Stumm');
+  };
+});
+
+
+// ── Statistik ─────────────────────────────────────────────
+registerPage('statistik', async (el) => {
+  fw.setTitle('Statistik');
+  fw.showBack(() => navigateBack());
+  el.innerHTML = '<div class="empty">⏳ Lade...</div>';
+
+  const jetzt    = new Date();
+  const jahrAkt  = jetzt.getFullYear();
+  const jahrVor  = jahrAkt - 1;
+
+  // Alle Daten laden
+  const [usersSnap, anwSnap, einsaetzeSnap, diensteSnap] = await Promise.all([
+    fw.getDocs('users'),
+    fw.getDocs('anwesenheiten'),
+    fw.getDocs('einsaetze'),
+    fw.getDocs('dienste'),
+  ]);
+
+  const users     = usersSnap.docs.map(d => ({id:d.id,...d.data()})).filter(u => u.aktiv !== false && u.vorname);
+  const anw       = anwSnap.docs.map(d => d.data()).filter(a => a.status==='kommt' || a.status==='bestaetigt');
+  const einsaetze = einsaetzeSnap.docs.map(d => ({id:d.id,...d.data()}));
+  const dienste   = diensteSnap.docs.map(d => ({id:d.id,...d.data()}));
+
+  // Hilfsfunktionen
+  const jahrvon = (datum, jahr) => {
+    const d = datum?.toDate ? datum.toDate() : new Date(datum);
+    return d.getFullYear() === jahr;
+  };
+
+  // Lehrgänge per User laden
+  const qualiSnaps = await Promise.all(users.map(u => fw.getDocs('users/'+u.id+'/qualifikationen')));
+  const qualiPerUser = {};
+  users.forEach((u, i) => {
+    qualiPerUser[u.id] = qualiSnaps[i].docs.map(d => d.data());
+  });
+
+  // Dienste/Einsätze als Map für Stunden-Lookup
+  const dienstMap  = new Map(dienste.map(d  => [d.id, d]));
+  const einsatzMap = new Map(einsaetze.map(e => [e.id, e]));
+
+  function stundenUndTyp(a) {
+    // typ+datum aus Quell-Collection ermitteln (anwesenheiten haben das evtl. nicht gesetzt)
+    const d = dienstMap.get(a.uebungId);
+    if (d) return { typ:'dienst',  datum: d.datum,  dauer_h: d.dauer_h||0 };
+    const e = einsatzMap.get(a.uebungId);
+    if (e) return { typ:'einsatz', datum: e.datum,  dauer_h: e.dauer_h||0 };
+    // Fallback auf gespeicherte Felder
+    return { typ: a.typ||'dienst', datum: a.datum, dauer_h: a.dauer_h||0 };
+  }
+  function stunden(userId, typ, jahr) {
+    return anw
+      .filter(a => a.userId===userId)
+      .reduce((s, a) => {
+        const {typ:t, datum:dat, dauer_h} = stundenUndTyp(a);
+        if (t !== typ) return s;
+        if (!jahrvon(dat, jahr)) return s;
+        return s + dauer_h;
+      }, 0);
+  }
+  function einsatzAnzahl(userId, jahr) {
+    return anw.filter(a => {
+      if (a.userId !== userId) return false;
+      const {typ, datum} = stundenUndTyp(a);
+      return typ==='einsatz' && jahrvon(datum, jahr);
+    }).length;
+  }
+  function lehrgangStunden(userId, jahr) {
+    return (qualiPerUser[userId]||[])
+      .filter(q => q.datum && jahrvon(q.datum, jahr))
+      .reduce((s, q) => s + (q.stunden || (q.tage || 1) * 8), 0);
+  }
+
+  // Jahresvergleich gesamt
+  const gesamt = (jahr) => ({
+    einsaetze: einsaetze.filter(e => jahrvon(e.datum, jahr)).length,
+    dienststunden: users.reduce((s,u) => s + stunden(u.id,'dienst',jahr), 0),
+    lehrgangsstunden: users.reduce((s,u) => s + lehrgangStunden(u.id,jahr), 0),
+  });
+  const gAkt = gesamt(jahrAkt);
+  const gVor = gesamt(jahrVor);
+
+  function diff(a, b, einheit='') {
+    const d = a - b;
+    const col = d > 0 ? '#16a34a' : d < 0 ? '#dc2626' : '#6b7280';
+    const pfeil = d > 0 ? '▲' : d < 0 ? '▼' : '=';
+    return `<span style="color:${col};font-size:0.8rem">${pfeil} ${Math.abs(d)}${einheit}</span>`;
+  }
+
+  // Pro-Kamerad-Tabelle
+  const kRows = users
+    .sort((a,b) => (a.nachname||'').localeCompare(b.nachname||'', 'de') || (a.vorname||'').localeCompare(b.vorname||'', 'de'))
+    .map(u => {
+      const dAkt = stunden(u.id,'dienst',jahrAkt);
+      const dVor = stunden(u.id,'dienst',jahrVor);
+      const lAkt = lehrgangStunden(u.id,jahrAkt);
+      const lVor = lehrgangStunden(u.id,jahrVor);
+      const eAkt = einsatzAnzahl(u.id,jahrAkt);
+      const eVor = einsatzAnzahl(u.id,jahrVor);
+      return {u, dAkt, dVor, lAkt, lVor, eAkt, eVor};
+    }); // nur aktive Kameraden, alphabetisch
+
+  const sumD = (jahr) => kRows.reduce((s,r) => s+(jahr===jahrAkt?r.dAkt:r.dVor),0);
+  const sumL = (jahr) => kRows.reduce((s,r) => s+(jahr===jahrAkt?r.lAkt:r.lVor),0);
+  const sumE = (jahr) => kRows.reduce((s,r) => s+(jahr===jahrAkt?r.eAkt:r.eVor),0);
+
+  el.innerHTML = `
+    <div class="section-header">Jahresvergleich</div>
+    <div class="card">
+      <table style="width:100%;border-collapse:collapse;font-size:0.85rem">
+        <thead>
+          <tr style="color:var(--muted);font-size:0.75rem">
+            <th style="text-align:left;padding:0.4rem 0.3rem"></th>
+            <th style="text-align:right;padding:0.4rem 0.3rem">${jahrVor}</th>
+            <th style="text-align:right;padding:0.4rem 0.3rem">${jahrAkt}</th>
+            <th style="text-align:right;padding:0.4rem 0.3rem">Diff</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr style="border-top:1px solid var(--border)">
+            <td style="padding:0.5rem 0.3rem">Einsätze</td>
+            <td style="text-align:right;padding:0.5rem 0.3rem">${gVor.einsaetze}</td>
+            <td style="text-align:right;padding:0.5rem 0.3rem;font-weight:600">${gAkt.einsaetze}</td>
+            <td style="text-align:right;padding:0.5rem 0.3rem">${diff(gAkt.einsaetze,gVor.einsaetze)}</td>
+          </tr>
+          <tr style="border-top:1px solid var(--border)">
+            <td style="padding:0.5rem 0.3rem">Dienststunden</td>
+            <td style="text-align:right;padding:0.5rem 0.3rem">${dauerFormat(gVor.dienststunden)}h</td>
+            <td style="text-align:right;padding:0.5rem 0.3rem;font-weight:600">${dauerFormat(gAkt.dienststunden)}h</td>
+            <td style="text-align:right;padding:0.5rem 0.3rem">${diff(gAkt.dienststunden,gVor.dienststunden,'h')}</td>
+          </tr>
+          <tr style="border-top:1px solid var(--border)">
+            <td style="padding:0.5rem 0.3rem">Lehrgangsstunden</td>
+            <td style="text-align:right;padding:0.5rem 0.3rem">${dauerFormat(gVor.lehrgangsstunden)}h</td>
+            <td style="text-align:right;padding:0.5rem 0.3rem;font-weight:600">${dauerFormat(gAkt.lehrgangsstunden)}h</td>
+            <td style="text-align:right;padding:0.5rem 0.3rem">${diff(gAkt.lehrgangsstunden,gVor.lehrgangsstunden,'h')}</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="section-header">Pro Kamerad</div>
+    <div class="card" style="padding:0;overflow:hidden">
+      <div style="overflow-x:auto;-webkit-overflow-scrolling:touch">
+        <table style="width:100%;border-collapse:collapse;font-size:0.78rem;min-width:380px">
+          <thead>
+            <tr style="color:var(--muted);font-size:0.72rem;background:var(--panel)">
+              <th style="text-align:left;padding:0.5rem 0.6rem;position:sticky;left:0;background:var(--panel);z-index:2;min-width:90px">Kamerad</th>
+              <th colspan="2" style="text-align:center;padding:0.35rem 0.4rem;border-left:1px solid var(--border)">Dienste</th>
+              <th colspan="2" style="text-align:center;padding:0.35rem 0.4rem;border-left:1px solid var(--border)">Lehrgänge</th>
+              <th colspan="2" style="text-align:center;padding:0.35rem 0.4rem;border-left:1px solid var(--border)">Einsätze</th>
+            </tr>
+            <tr style="color:var(--muted);font-size:0.7rem;background:var(--panel)">
+              <th style="padding:0.2rem 0.6rem;position:sticky;left:0;background:var(--panel);z-index:2;border-bottom:2px solid var(--border)"></th>
+              <th style="text-align:right;padding:0.2rem 0.4rem;border-left:1px solid var(--border);border-bottom:2px solid var(--border)">${jahrVor}</th>
+              <th style="text-align:right;padding:0.2rem 0.4rem;border-bottom:2px solid var(--border)">${jahrAkt}</th>
+              <th style="text-align:right;padding:0.2rem 0.4rem;border-left:1px solid var(--border);border-bottom:2px solid var(--border)">${jahrVor}</th>
+              <th style="text-align:right;padding:0.2rem 0.4rem;border-bottom:2px solid var(--border)">${jahrAkt}</th>
+              <th style="text-align:right;padding:0.2rem 0.4rem;border-left:1px solid var(--border);border-bottom:2px solid var(--border)">${jahrVor}</th>
+              <th style="text-align:right;padding:0.2rem 0.4rem;border-bottom:2px solid var(--border)">${jahrAkt}</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${kRows.map((r,idx) => {
+              const odd = idx%2 !== 0;
+              const isKlassisch = document.body.getAttribute('data-theme') === 'klassisch';
+              const zebraStyle = odd ? (isKlassisch ? 'background:rgba(0,0,0,0.07)' : 'background:rgba(255,255,255,0.08)') : '';
+              return `<tr style="${zebraStyle}">
+                <td class="${odd?'stat-td-sticky-odd':'stat-td-sticky'}" style="padding:0.4rem 0.6rem;font-weight:500">${kurzName(r.u.vorname, r.u.nachname)}</td>
+                <td style="text-align:right;padding:0.4rem 0.4rem;border-left:1px solid var(--border);color:var(--muted)">${dauerFormat(r.dVor)}h</td>
+                <td style="text-align:right;padding:0.4rem 0.4rem">${dauerFormat(r.dAkt)}h</td>
+                <td style="text-align:right;padding:0.4rem 0.4rem;border-left:1px solid var(--border);color:var(--muted)">${dauerFormat(r.lVor)}h</td>
+                <td style="text-align:right;padding:0.4rem 0.4rem">${dauerFormat(r.lAkt)}h</td>
+                <td style="text-align:right;padding:0.4rem 0.4rem;border-left:1px solid var(--border);color:var(--muted)">${r.eVor}</td>
+                <td style="text-align:right;padding:0.4rem 0.4rem">${r.eAkt}</td>
+              </tr>`;
+            }).join('')}
+          </tbody>
+          <tfoot>
+            <tr style="border-top:2px solid var(--border);font-weight:700;background:var(--panel)">
+              <td class="stat-td-sticky" style="padding:0.4rem 0.6rem">Gesamt</td>
+              <td style="text-align:right;padding:0.4rem 0.4rem;border-left:1px solid var(--border);color:var(--muted)">${dauerFormat(sumD(jahrVor))}h</td>
+              <td style="text-align:right;padding:0.4rem 0.4rem">${dauerFormat(sumD(jahrAkt))}h</td>
+              <td style="text-align:right;padding:0.4rem 0.4rem;border-left:1px solid var(--border);color:var(--muted)">${dauerFormat(sumL(jahrVor))}h</td>
+              <td style="text-align:right;padding:0.4rem 0.4rem">${dauerFormat(sumL(jahrAkt))}h</td>
+              <td style="text-align:right;padding:0.4rem 0.4rem;border-left:1px solid var(--border);color:var(--muted)">${sumE(jahrVor)}</td>
+              <td style="text-align:right;padding:0.4rem 0.4rem">${sumE(jahrAkt)}</td>
+            </tr>
+          </tfoot>
+        </table>
+      </div>
+    </div>
+  `;
+});
+
+
+// ── Lehrgangsverwaltung ───────────────────────────────────
+const ALLE_LEHRGAENGE = ['Truppmann','Truppführer','Gruppenführer','Zugführer','Wehrführer','AGT','Maschinist','Sprechfunk','TH-Grund','Absturzsicherung','ABC-Grund','Erste-Hilfe','Motorsäge A/B','Motorsäge C/D'];
+
+// Lehrgänge die ausschließlich an Werktagen stattfinden
+const WERKTAG_LEHRGAENGE = ['Gruppenführer','Zugführer','Wehrführer'];
+const BELIEBIG_LEHRGAENGE  = ['Erste-Hilfe']; // beliebige Wochentage
+
+// Vorlagen: { tage, stunden } – Stunden/Tag wird berechnet
+const LEHRGANG_VORLAGEN = {
+  'Truppführer':     { tage: 5,  stunden: 35 },
+  'Gruppenführer':   { tage: 10, stunden: 70 },
+  'Zugführer':       { tage: 10, stunden: 70 },
+  'Wehrführer':      { tage: 3,  stunden: 24 },
+  'AGT':             { tage: 4,  stunden: 38 },
+  'Maschinist':      { tage: 4,  stunden: 35 },
+  'Sprechfunk':      { tage: 3,  stunden: 32 },
+  'TH-Grund':        { tage: 4,  stunden: 35 },
+  'Absturzsicherung':{ tage: 3,  stunden: 29 },
+  'ABC-Grund':       { tage: 10, stunden: 70 },
+  'Erste-Hilfe':     { tage: 1,  stunden: 8  },
+  'Motorsäge A/B':   { tage: 2,  stunden: 16 },
+  'Motorsäge C/D':   { tage: 2,  stunden: 16 },
+};
+
+function berechneEndDatum(startDatumStr, tage, lehrgang) {
+  const nurWerktage = WERKTAG_LEHRGAENGE.includes(lehrgang);
+  const beliebig    = BELIEBIG_LEHRGAENGE.includes(lehrgang);
+  const d = new Date(startDatumStr);
+  let gezaehlt = 0;
+  while (gezaehlt < tage) {
+    const wt = d.getDay();
+    const zaehlt = beliebig
+      || (nurWerktage  && wt >= 1 && wt <= 5)
+      || (!nurWerktage && !beliebig && (wt === 0 || wt === 6));
+    if (zaehlt) {
+      gezaehlt++;
+      if (gezaehlt < tage) d.setDate(d.getDate() + 1);
+    } else {
+      d.setDate(d.getDate() + 1);
+    }
+  }
+  return d.toISOString().slice(0, 10);
+}
+
+registerPage('lehrgaenge', async (el) => {
+  fw.setTitle('Lehrgänge');
+  fw.showBack(() => navigateBack());
+
+  const jahrAkt = new Date().getFullYear();
+  let aktivTab = 'uebersicht';
+  let planJahr = jahrAkt + 1;
+
+  const render = async () => {
+    el.innerHTML = `
+      <div style="display:flex;gap:0.4rem;margin-bottom:0.8rem">
+        <button class="btn btn-sm ${aktivTab==='uebersicht'?'btn-primary':'btn-secondary'}" onclick="lTab('uebersicht')">📋 Übersicht</button>
+        <button class="btn btn-sm ${aktivTab==='planung'?'btn-primary':'btn-secondary'}" onclick="lTab('planung')">📅 Planung</button>
+        <button class="btn btn-sm ${aktivTab==='erfassen'?'btn-primary':'btn-secondary'}" onclick="lTab('erfassen')">✏️ Erfassen</button>
+      </div>
+      <div id="l-inhalt"><div class="empty">⏳ Lade...</div></div>`;
+
+    window.lTab = (tab) => { aktivTab = tab; render(); };
+
+    if (aktivTab === 'uebersicht') await renderUebersicht();
+    else if (aktivTab === 'planung') await renderPlanung();
+    else await renderErfassen();
+  };
+
+  const renderUebersicht = async () => {
+    const inh = document.getElementById('l-inhalt');
+    const [usersSnap, ...qualiSnaps] = await (async () => {
+      const us = await fw.getDocs('users');
+      const users = us.docs.map(d => ({id:d.id,...d.data()})).filter(u => u.aktiv !== false && u.vorname);
+      const qs = await Promise.all(users.map(u => fw.getDocs('users/'+u.id+'/qualifikationen')));
+      return [us, ...qs.map((q,i) => ({userId: users[i].id, qualis: q.docs.map(d => d.data())}))];
+    })();
+    const users = usersSnap.docs.map(d => ({id:d.id,...d.data()})).filter(u => u.aktiv !== false && u.vorname)
+      .sort((a,b) => (a.nachname||'').localeCompare(b.nachname||'', 'de'));
+    const qualiPerUser = {};
+    qualiSnaps.forEach(({userId, qualis}) => { qualiPerUser[userId] = qualis.map(q => (q.bezeichnung||'').trim().toLowerCase()); });
+
+    const cols = ALLE_LEHRGAENGE;
+    const rows = users.map(u => {
+      const hat = qualiPerUser[u.id] || [];
+      return { u, checks: cols.map(l => hat.includes(l.toLowerCase())) };
+    });
+
+    inh.innerHTML = `
+      <div class="card" style="padding:0;overflow:hidden">
+        <div style="overflow-x:auto;-webkit-overflow-scrolling:touch">
+          <table style="border-collapse:collapse;font-size:0.75rem;min-width:600px">
+            <thead>
+              <tr style="color:var(--muted);font-size:0.72rem;background:var(--panel)">
+                <th style="text-align:left;padding:0.5rem 0.6rem;position:sticky;left:0;background:var(--panel);z-index:2;min-width:90px;border-bottom:2px solid var(--border)">Kamerad</th>
+                ${cols.map(l => `<th style="padding:0.3rem 0.2rem;writing-mode:vertical-rl;transform:rotate(180deg);height:80px;font-weight:500;border-bottom:2px solid var(--border);min-width:28px">${l}</th>`).join('')}
+              </tr>
+            </thead>
+            <tbody>
+              ${rows.map((r, idx) => {
+                const odd = idx % 2 !== 0;
+                const isKlassisch = document.body.getAttribute('data-theme') === 'klassisch';
+                const zebraStyle = odd ? (isKlassisch ? 'background:rgba(0,0,0,0.07)' : 'background:rgba(255,255,255,0.08)') : '';
+                return `<tr style="${zebraStyle}">
+                  <td class="${odd?'stat-td-sticky-odd':'stat-td-sticky'}" style="padding:0.4rem 0.6rem;font-weight:500">
+                    ${kurzName(r.u.vorname, r.u.nachname)}
+                  </td>
+                  ${r.checks.map(hat => `<td style="text-align:center;padding:0.3rem 0.2rem">${hat ? '<span style="color:#22c55e">✓</span>' : '<span style="color:var(--border)">·</span>'}</td>`).join('')}
+                </tr>`;
+              }).join('')}
+            </tbody>
+            <tfoot>
+              <tr style="border-top:2px solid var(--border);background:var(--panel)">
+                <td class="stat-td-sticky" style="padding:0.4rem 0.6rem;font-weight:700;font-size:0.75rem;color:var(--muted)">Σ</td>
+                ${cols.map((_,ci) => {
+                  const sum = rows.filter(r => r.checks[ci]).length;
+                  return `<td style="text-align:center;padding:0.3rem 0.2rem;font-weight:700;font-size:0.8rem;color:${sum>0?'#22c55e':'var(--muted)'}">${sum||'·'}</td>`;
+                }).join('')}
+              </tr>
+            </tfoot>
+          </table>
+        </div>
+      </div>`;
+  };
+
+  const renderPlanung = async () => {
+    const inh = document.getElementById('l-inhalt');
+    const [usersSnap, planSnap] = await Promise.all([
+      fw.getDocs('users'),
+      fw.getDocs('lehrgangsplanung', fw.where('jahr','==', planJahr)),
+    ]);
+    const users = usersSnap.docs.map(d => ({id:d.id,...d.data()})).filter(u => u.aktiv !== false && u.vorname)
+      .sort((a,b) => (a.nachname||'').localeCompare(b.nachname||'', 'de'));
+    const planung = planSnap.docs.map(d => ({id:d.id,...d.data()}));
+    const usersMap = new Map(users.map(u => [u.id, u]));
+
+    const jahreOptionen = [jahrAkt, jahrAkt+1, jahrAkt+2].map(j =>
+      `<option value="${j}" ${j===planJahr?'selected':''}>${j}</option>`).join('');
+
+    inh.innerHTML = `
+      <div style="display:flex;align-items:center;gap:0.6rem;margin-bottom:0.6rem">
+        <label style="font-size:0.85rem;color:var(--muted)">Jahr:</label>
+        <select id="plan-jahr" onchange="planJahrWechsel(this.value)" style="font-size:0.88rem">${jahreOptionen}</select>
+      </div>
+      ${planung.length ? `
+      <div class="card" style="padding:0">
+        ${planung.sort((a,b) => {
+          const na = usersMap.get(a.userId)?.nachname||''; const nb = usersMap.get(b.userId)?.nachname||'';
+          return na.localeCompare(nb,'de') || (a.lehrgang||'').localeCompare(b.lehrgang||'');
+        }).map(p => {
+          const u = usersMap.get(p.userId);
+          return `<div class="list-item">
+            <div class="list-item-body">
+              <div class="list-item-title">${u ? kurzName(u.vorname, u.nachname) : '–'} · ${p.lehrgang}</div>
+              <div class="list-item-sub">${p.tage ? p.tage+' Tage' : ''}${p.bemerkung ? (p.tage?' · ':'')+p.bemerkung : ''}${!p.tage&&!p.bemerkung?'Geplant':''}</div>
+            </div>
+            <button class="btn btn-sm btn-danger" onclick="planungLoeschen('${p.id}')">🗑</button>
+          </div>`;
+        }).join('')}
+      </div>` : `<p class="muted" style="font-size:0.85rem;text-align:center;padding:1rem">Noch keine Planung für ${planJahr}</p>`}
+
+      <div class="card" style="margin-top:0.4rem">
+        <div class="card-title" style="margin-bottom:0.7rem">+ Lehrgang planen</div>
+        <div class="form-row">
+          <label>Kamerad</label>
+          <select id="plan-user">
+            <option value="">– wählen –</option>
+            ${users.map(u => `<option value="${u.id}">${u.nachname||''}, ${u.vorname||''}</option>`).join('')}
+          </select>
+        </div>
+        <div class="form-row">
+          <label>Lehrgang</label>
+          <select id="plan-lehrgang" onchange="planVorlageLaden()">
+            <option value="">– wählen –</option>
+            ${ALLE_LEHRGAENGE.map(l => `<option value="${l}">${l}</option>`).join('')}
+          </select>
+        </div>
+        <div class="form-row">
+          <label>Geplante Tage (optional)</label>
+          <input id="plan-tage" type="number" min="1" max="30" placeholder="z.B. 5">
+        </div>
+        <div class="form-row">
+          <label>Bemerkung (optional)</label>
+          <input id="plan-bem" placeholder="z.B. LA Eisenhüttenstadt">
+        </div>
+        <button class="btn btn-primary btn-full" style="margin-top:0.4rem" onclick="planungSpeichern(${planJahr})">💾 Speichern</button>
+      </div>`;
+
+    window.planJahrWechsel = (j) => { planJahr = parseInt(j); renderPlanung(); };
+    window.planVorlageLaden = () => {
+      const l = document.getElementById('plan-lehrgang').value;
+      const v = LEHRGANG_VORLAGEN[l];
+      if (v) document.getElementById('plan-tage').value = v.tage;
+    };
+  };
+
+  const renderErfassen = async () => {
+    const inh = document.getElementById('l-inhalt');
+    const usersSnap = await fw.getDocs('users');
+    const users = usersSnap.docs.map(d => ({id:d.id,...d.data()}))
+      .filter(u => u.aktiv !== false && u.vorname)
+      .sort((a,b) => (a.nachname||'').localeCompare(b.nachname||'', 'de'));
+
+    inh.innerHTML = `
+      <div class="card">
+        <div class="card-title" style="margin-bottom:0.7rem">Lehrgang nacherfassen</div>
+        <p style="font-size:0.82rem;color:var(--muted);margin-bottom:0.8rem">
+          Erstellt einen Dienst-Eintrag der in die Statistik einfließt.
+        </p>
+        <div class="form-row">
+          <label>Lehrgang</label>
+          <select id="erf-lehrgang" onchange="erfVorlageLaden()">
+            <option value="">– wählen –</option>
+            ${ALLE_LEHRGAENGE.map(l => `<option value="${l}">${l}</option>`).join('')}
+          </select>
+        </div>
+        <div class="form-row">
+          <label>Datum (erster Tag)</label>
+          <input id="erf-datum" type="date" value="${new Date().toISOString().slice(0,10)}" oninput="erfEndDatumAnzeigen()">
+          <div id="erf-enddatum-hint" style="font-size:0.78rem;color:var(--muted);margin-top:0.2rem">Im Profil wird der letzte Tag (Prüfungsdatum) gespeichert</div>
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:0.6rem">
+          <div class="form-row">
+            <label>Lehrgangstage</label>
+            <input id="erf-tage" type="number" min="1" max="30" value="1" oninput="erfEndDatumAnzeigen()">
+          </div>
+          <div class="form-row">
+            <label>Gesamtstunden</label>
+            <input id="erf-stunden" type="number" min="1" max="300" step="0.5" value="8">
+          </div>
+        </div>
+        <div class="form-row">
+          <label>Teilnehmer</label>
+          <div style="border:1.5px solid var(--border);border-radius:10px;overflow:hidden;margin-top:0.2rem">
+            <div style="padding:0.4rem 0.7rem;border-bottom:1px solid var(--border);display:flex;gap:0.5rem">
+              <button class="btn btn-sm btn-secondary" onclick="erfAlleWaehlen(true)" style="font-size:0.78rem;padding:0.2rem 0.6rem">Alle</button>
+              <button class="btn btn-sm btn-secondary" onclick="erfAlleWaehlen(false)" style="font-size:0.78rem;padding:0.2rem 0.6rem">Keine</button>
+            </div>
+            ${users.map(u => `
+              <label style="display:flex;align-items:center;gap:0.6rem;padding:0.45rem 0.7rem;cursor:pointer;border-bottom:1px solid var(--border)">
+                <input type="checkbox" class="erf-user-cb" value="${u.id}" style="width:1rem;height:1rem;flex-shrink:0">
+                <span style="font-size:0.88rem">${u.nachname||''}, ${u.vorname||''}</span>
+                <span style="font-size:0.78rem;color:var(--muted);margin-left:auto">${u.dienstgrad||''}</span>
+              </label>`).join('')}
+          </div>
+        </div>
+        <button class="btn btn-primary btn-full" style="margin-top:0.6rem" onclick="lehrgangsErfassen()">💾 Lehrgang speichern</button>
+        <div id="erf-status" style="font-size:0.82rem;color:var(--muted);margin-top:0.5rem;text-align:center"></div>
+      </div>`;
+
+    window.erfAlleWaehlen = (an) => {
+      document.querySelectorAll('.erf-user-cb').forEach(cb => cb.checked = an);
+    };
+
+    window.erfVorlageLaden = () => {
+      const lehrgang = document.getElementById('erf-lehrgang').value;
+      const vorlage = LEHRGANG_VORLAGEN[lehrgang];
+      if (vorlage) {
+        document.getElementById('erf-tage').value = vorlage.tage;
+        document.getElementById('erf-stunden').value = vorlage.stunden;
+      }
+      erfEndDatumAnzeigen();
+    };
+
+    window.erfEndDatumAnzeigen = () => {
+      const lehrgang = document.getElementById('erf-lehrgang').value;
+      const datumStr = document.getElementById('erf-datum').value;
+      const tage     = parseInt(document.getElementById('erf-tage').value) || 1;
+      const hint     = document.getElementById('erf-enddatum-hint');
+      if (!datumStr || !lehrgang) { hint.textContent = 'Im Profil wird der letzte Tag (Prüfungsdatum) gespeichert'; return; }
+      const end = berechneEndDatum(datumStr, tage, lehrgang);
+      const [y,m,d] = end.split('-');
+      const typ = WERKTAG_LEHRGAENGE.includes(lehrgang) ? 'Werktage' : BELIEBIG_LEHRGAENGE.includes(lehrgang) ? 'Tage' : 'Wochenendtage';
+      hint.textContent = `Prüfungsdatum: ${d}.${m}.${y} (${tage} ${typ})`;
+    };
+  };
+
+  window.lehrgangsErfassen = async () => {
+    const lehrgang = document.getElementById('erf-lehrgang').value;
+    const datumStr = document.getElementById('erf-datum').value;
+    const tage          = parseFloat(document.getElementById('erf-tage').value) || 1;
+    const gesamtStunden = parseFloat(document.getElementById('erf-stunden').value) || 8;
+    const ausgewaehlte = [...document.querySelectorAll('.erf-user-cb:checked')].map(cb => cb.value);
+
+    if (!lehrgang)               { fw.toast('Bitte Lehrgang wählen', true); return; }
+    if (!datumStr)               { fw.toast('Bitte Datum eintragen', true); return; }
+    if (!ausgewaehlte.length)    { fw.toast('Mindestens einen Teilnehmer wählen', true); return; }
+
+    const status = document.getElementById('erf-status');
+    status.textContent = '⏳ Wird gespeichert…';
+    document.querySelector('#l-inhalt .btn-primary').disabled = true;
+
+    try {
+      const endDatumStr = berechneEndDatum(datumStr, tage, lehrgang);
+
+      // Für jeden Teilnehmer: vorhandenen Eintrag löschen, dann neu anlegen
+      await Promise.all(ausgewaehlte.map(async userId => {
+        const snap = await fw.getDocs('users/'+userId+'/qualifikationen');
+        const vorhandene = snap.docs.filter(d =>
+          (d.data().bezeichnung||'').trim().toLowerCase() === lehrgang.trim().toLowerCase()
+        );
+        await Promise.all(vorhandene.map(d => fw.deleteDoc('users/'+userId+'/qualifikationen/'+d.id)));
+        await fw.addDoc('users/'+userId+'/qualifikationen', {
+          bezeichnung: lehrgang,
+          datum: endDatumStr,
+          tage,
+          stunden: gesamtStunden,
+          bemerkung: '',
+        });
+      }));
+
+      fw.toast(`✅ ${ausgewaehlte.length} Kamerad${ausgewaehlte.length!==1?'en':''} eingetragen`);
+      status.textContent = `✅ ${ausgewaehlte.length} Teilnehmer · ${tage} Tage · ${gesamtStunden}h · Prüfungsdatum: ${endDatumStr}`;
+    } catch(e) {
+      fw.toast('Fehler: ' + e.message, true);
+      status.textContent = '❌ ' + e.message;
+      document.querySelector('#l-inhalt .btn-primary').disabled = false;
+    }
+  };
+
+  window.planungSpeichern = async (jahr) => {
+    const userId = document.getElementById('plan-user').value;
+    const lehrgang = document.getElementById('plan-lehrgang').value;
+    if (!userId || !lehrgang) { fw.toast('Kamerad und Lehrgang wählen', true); return; }
+    const tage = parseInt(document.getElementById('plan-tage').value) || null;
+    const bemerkung = document.getElementById('plan-bem').value.trim();
+    await fw.addDoc('lehrgangsplanung', { userId, lehrgang, jahr, tage, bemerkung });
+    fw.toast('Gespeichert ✅');
+    renderPlanung();
+  };
+
+  window.planungLoeschen = async (id) => {
+    if (!confirm('Eintrag löschen?')) return;
+    await fw.deleteDoc('lehrgangsplanung/'+id);
+    fw.toast('Gelöscht');
+    renderPlanung();
+  };
+
+  await render();
+});
+
+// ── News erstellen ────────────────────────────────────────
+registerPage('news-form', async (el) => {
+  fw.setTitle('Beitrag erstellen');
+  fw.showBack(() => navigateBack());
+  let optionen = ['', ''];
+  let pdfFile = null;
+
+  const render = () => {
+    el.innerHTML = `
+      <div class="card">
+        <div class="form-row"><label>Titel</label><input id="nf-titel" placeholder="Überschrift" value="${document.getElementById('nf-titel')?.value||''}"></div>
+        <div class="form-row"><label>Text</label><textarea id="nf-inhalt" rows="4" style="width:100%;padding:0.6rem;border:1px solid var(--border);border-radius:8px;font-size:0.9rem;resize:vertical">${document.getElementById('nf-inhalt')?.value||''}</textarea></div>
+        <div class="form-row">
+          <label>PDF anhängen (optional)</label>
+          <input type="file" id="nf-pdf" accept="application/pdf" style="font-size:0.88rem">
+          <div id="nf-pdf-hint" style="font-size:0.75rem;color:var(--muted);margin-top:0.2rem">${pdfFile?'📎 '+pdfFile.name:'Kein PDF ausgewählt'}</div>
+        </div>
+        <div style="display:flex;align-items:center;gap:0.5rem;margin:0.5rem 0">
+          <input type="checkbox" id="nf-abstimmung-cb" style="width:20px;height:20px" ${document.getElementById('nf-abstimmung-cb')?.checked?'checked':''}>
+          <label for="nf-abstimmung-cb" style="font-size:0.88rem">Abstimmung hinzufügen</label>
+        </div>
+        <div id="nf-abstimmung-block" style="display:${document.getElementById('nf-abstimmung-cb')?.checked?'block':'none'}">
+          <div class="form-row"><label>Frage</label><input id="nf-frage" value="${document.getElementById('nf-frage')?.value||''}"></div>
+          ${optionen.map((o,i) => `<div class="form-row"><label>Option ${i+1}</label><input class="nf-opt" data-i="${i}" value="${o}"></div>`).join('')}
+          <button class="btn btn-secondary btn-sm" onclick="nfAddOption()">+ Option</button>
+        </div>
+        <div class="btn-row" style="margin-top:1rem">
+          <button class="btn btn-primary" onclick="newsSpeichern()" id="nf-save-btn">💾 Veröffentlichen</button>
+        </div>
+      </div>`;
+    document.getElementById('nf-abstimmung-cb')?.addEventListener('change', e => {
+      document.getElementById('nf-abstimmung-block').style.display = e.target.checked ? 'block' : 'none';
+    });
+    document.getElementById('nf-pdf')?.addEventListener('change', e => {
+      pdfFile = e.target.files[0] || null;
+      document.getElementById('nf-pdf-hint').textContent = pdfFile ? '📎 '+pdfFile.name : 'Kein PDF ausgewählt';
+    });
+    document.querySelectorAll('.nf-opt').forEach(inp => {
+      inp.addEventListener('input', e => { optionen[+e.target.dataset.i] = e.target.value; });
+    });
+  };
+  render();
+
+  window.nfAddOption = () => { optionen.push(''); render(); };
+  window.newsSpeichern = async () => {
+    const titel  = document.getElementById('nf-titel').value.trim();
+    const inhalt = document.getElementById('nf-inhalt').value.trim();
+    if (!titel) { fw.toast('Titel fehlt', true); return; }
+    const btn = document.getElementById('nf-save-btn');
+    btn.disabled = true; btn.textContent = '⏳ Wird gespeichert...';
+    const hatAbst = document.getElementById('nf-abstimmung-cb')?.checked;
+    const data = { titel, inhalt, erstelltAm: new Date(), erstelltVon: fw.user.uid };
+    if (hatAbst) {
+      const frage = document.getElementById('nf-frage').value.trim();
+      const opts  = optionen.filter(o => o.trim());
+      if (!frage || opts.length < 2) { fw.toast('Frage und mind. 2 Optionen erforderlich', true); btn.disabled=false; btn.textContent='💾 Veröffentlichen'; return; }
+      data.abstimmung = { frage, optionen: opts.map(text => ({text, stimmen:[]})) };
+    }
+    // PDF hochladen
+    if (pdfFile) {
+      try {
+        btn.textContent = '⏳ PDF wird hochgeladen...';
+        const pfad = `news-pdfs/${Date.now()}_${pdfFile.name.replace(/[^a-zA-Z0-9._-]/g,'_')}`;
+        const url  = await fw.uploadPdf(pdfFile, pfad);
+        data.pdf = { name: pdfFile.name, url, pfad };
+      } catch(e) {
+        fw.toast('PDF-Upload fehlgeschlagen: '+e.message, true);
+        btn.disabled=false; btn.textContent='💾 Veröffentlichen'; return;
+      }
+    }
+    await fw.addDoc('news', data);
+    fw.toast('Veröffentlicht ✅');
+    navigate('dashboard');
+  };
+});
+
+// ── Kameraden ─────────────────────────────────────────────
+registerPage('kameraden', async (el) => {
+  fw.setTitle('Kameraden');
+  fw.showHeaderAction('+ Neu', () => navigate('kamerad-form', {}));
+
+  const snap = await fw.getDocs('users');
+  const users = snap.docs.map(d => ({id:d.id,...d.data()}))
+    .sort((a,b) => {
+      const aAktiv = a.aktiv !== false;
+      const bAktiv = b.aktiv !== false;
+      if (aAktiv !== bAktiv) return aAktiv ? -1 : 1;
+      return (a.nachname||'').localeCompare(b.nachname||'', 'de');
+    });
+  const aktiveUsers = users.filter(u => u.aktiv !== false);
+
+  // Anwesenheiten letzte 12 Monate laden
+  const vor12m = new Date(); vor12m.setFullYear(vor12m.getFullYear()-1);
+  const anwSnap = await fw.getDocs('anwesenheiten');
+  const stundenJahr = {};
+  for (const d of anwSnap.docs) {
+    const a = d.data();
+    if (a.status !== 'kommt') continue;
+    const dat = a.datum?.toDate ? a.datum.toDate() : new Date(a.datum);
+    if (dat < vor12m) continue;
+    stundenJahr[a.userId] = (stundenJahr[a.userId] || 0) + (a.dauer_h || 0);
+  }
+
+  const ZIEL = 40;
+  function stundenBadge(userId) {
+    const h = Math.round((stundenJahr[userId] || 0) * 10) / 10;
+    const pct = Math.min(100, Math.round(h / ZIEL * 100));
+    const erreicht = h >= ZIEL;
+    const farbe = erreicht ? '#22c55e' : h >= ZIEL * 0.75 ? '#f59e0b' : 'var(--muted)';
+    return `<div style="text-align:right;min-width:64px">
+      <div style="font-size:0.8rem;font-weight:600;color:${farbe}">${h}h</div>
+      <div style="background:var(--border);border-radius:3px;height:4px;width:64px;margin-top:3px">
+        <div style="background:${farbe};width:${pct}%;height:4px;border-radius:3px"></div>
+      </div>
+    </div>`;
+  }
+
+  // Aufgaben für Wehrführer berechnen
+  let aufgabenHtml = '';
+  if (fw.isWehrfuehrer()) {
+    // Alle Qualifikationen aktiver Kameraden laden
+    const qualiPromises = aktiveUsers.map(u =>
+      fw.getDocs('users/'+u.id+'/qualifikationen').then(s => ({
+        user: u,
+        qualis: s.docs.map(d => ({id:d.id,...d.data()}))
+      }))
+    );
+    const alleQualis = await Promise.all(qualiPromises);
+    const heute = new Date();
+    const j3 = new Date(); j3.setFullYear(heute.getFullYear()-3);
+    const j1 = new Date(); j1.setFullYear(heute.getFullYear()-1);
+    const aufgaben = [];
+
+    for (const {user, qualis} of alleQualis) {
+      const name = `${user.vorname||''} ${user.nachname||''}`.trim();
+      // Lehrgänge ohne Datum
+      for (const q of qualis) {
+        if (!q.datum) {
+          aufgaben.push({ typ: 'kein-datum', text: `${name}: „${q.bezeichnung}" hat kein Datum`, userId: user.id });
+        }
+      }
+      // Fehlender Dienstgrad
+      if (!user.dienstgrad) {
+        aufgaben.push({ typ: 'dienstgrad', text: `${name}: Kein Dienstgrad eingetragen`, userId: user.id });
+      }
+      // AGT: Gültigkeit prüfen
+      const hatAgt = qualis.some(q => (q.bezeichnung||'').trim().toLowerCase() === 'agt');
+      if (hatAgt) {
+        const unt  = user.agt_untersuchung ? new Date(user.agt_untersuchung) : null;
+        const waer = user.agt_waermeuebung ? new Date(user.agt_waermeuebung) : null;
+        const bel  = user.agt_belastung    ? new Date(user.agt_belastung)    : null;
+        const fehlt = [];
+        if (!unt  || unt  < j3) fehlt.push('G26 ' + (unt  ? `(${datum(unt)})` : 'fehlt'));
+        if (!waer || waer < j1) fehlt.push('Wärmeübung ' + (waer ? `(${datum(waer)})` : 'fehlt'));
+        if (!bel  || bel  < j1) fehlt.push('Belastung ' + (bel  ? `(${datum(bel)})` : 'fehlt'));
+        if (fehlt.length) {
+          aufgaben.push({ typ: 'agt', text: `${name} (AGT): ${fehlt.join(', ')}`, userId: user.id });
+        }
+      }
+      // Erste-Hilfe abgelaufen
+      const eh = qualis.find(q => (q.bezeichnung||'').trim().toLowerCase() === 'erste-hilfe');
+      if (eh?.datum) {
+        const ablauf = new Date(eh.datum?.toDate ? eh.datum.toDate() : eh.datum);
+        ablauf.setFullYear(ablauf.getFullYear() + 2);
+        if (ablauf < heute) {
+          aufgaben.push({ typ: 'eh', text: `${name}: Erste-Hilfe abgelaufen (${datum(ablauf)})`, userId: user.id });
+        }
+      }
+    }
+
+    if (aufgaben.length) {
+      const icons = { 'kein-datum': '📅', 'agt': '🔴', 'eh': '⚠️', 'dienstgrad': '🪖' };
+      aufgabenHtml = `
+        <details class="card" style="margin-bottom:0.6rem;padding:0">
+          <summary style="list-style:none;padding:0.4rem 0.8rem;cursor:pointer;display:flex;align-items:center;justify-content:space-between;font-size:13px;border-radius:8px">
+            <span style="font-weight:600;color:#f59e0b">⚠️ Offene Aufgaben (${aufgaben.length})</span>
+            <span style="color:var(--muted);font-size:1.1rem">▾</span>
+          </summary>
+          <div style="padding:0 0.8rem 0.8rem">
+            ${aufgaben.map(a => `
+              <div class="list-item" onclick="navigate('kamerad-detail',{id:'${a.userId}'})" style="border-bottom:1px solid var(--border);cursor:pointer">
+                <div style="font-size:1rem;margin-right:0.5rem">${icons[a.typ]||'•'}</div>
+                <div class="list-item-body"><div style="font-size:0.83rem">${a.text}</div></div>
+                <div class="list-chevron">›</div>
+              </div>`).join('')}
+          </div>
+        </details>`;
+    } else {
+      aufgabenHtml = `<div class="card" style="margin-bottom:0.6rem;color:#22c55e;font-size:0.88rem">✅ Keine offenen Aufgaben</div>`;
+    }
+  }
+
+  el.innerHTML = `
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:0.6rem;margin-bottom:0.2rem">
+      <button class="btn btn-secondary btn-sm btn-full" onclick="navigate('lehrgaenge')">📚 Lehrgänge</button>
+      <button class="btn btn-secondary btn-sm btn-full" onclick="navigate('statistik')">📊 Statistiken</button>
+    </div>
+    ${aufgabenHtml}
+    <div style="font-size:0.72rem;color:var(--muted);text-align:right;padding:0 0.2rem 0.3rem">Dienststunden (12 Mon.) · Ziel: ${ZIEL}h</div>
+    <div class="card">
+      ${users.map(u => `
+        <div class="list-item" onclick="navigate('kamerad-detail',{id:'${u.id}'})">
+          <div class="list-item-icon" style="${u.aktiv===false?'filter:grayscale(1);opacity:0.4':''}">🧑</div>
+          <div class="list-item-body">
+            <div class="list-item-title">${u.nachname||''}, ${u.vorname||''}</div>
+          </div>
+          ${stundenBadge(u.id)}
+          <div class="list-chevron">›</div>
+        </div>`).join('')}
+    </div>
+    ${fw.isWehrfuehrer() ? `
+    <details style="background:var(--card);border-radius:10px;padding:0.8rem;margin-top:0.8rem">
+      <summary style="font-weight:600;cursor:pointer;list-style:none;display:flex;align-items:center;gap:0.5rem">🏘️ Ortswehren verwalten</summary>
+      <div id="ortswehr-inline" style="margin-top:0.8rem">⏳ Lade...</div>
+    </details>` : ''}
+  `;
+  if (fw.isWehrfuehrer()) ladeOrtswehrenInline();
+});
+
+async function ladeOrtswehrenInline() {
+  const snap = await fw.getDocs('ortswehren');
+  const wehren = snap.docs.map(d => ({id:d.id,...d.data()}));
+  const el = document.getElementById('ortswehr-inline');
+  if (!el) return;
+  el.innerHTML = `
+    ${wehren.map(w => `
+      <div class="list-item">
+        <div class="list-item-body"><div class="list-item-title">${w.name}</div></div>
+        <div style="display:flex;gap:0.4rem">
+          <button class="btn btn-sm btn-secondary" onclick="navigate('ortswehr-form',{id:'${w.id}'})">✏️</button>
+          <button class="btn btn-sm btn-danger" onclick="ortswehrLoeschenInline('${w.id}')">🗑</button>
+        </div>
+      </div>`).join('') || '<p class="muted" style="font-size:0.85rem">Noch keine Ortswehren</p>'}
+    <div style="margin-top:0.6rem">
+      <button class="btn btn-secondary btn-sm" onclick="navigate('ortswehr-form',{})">+ Neue Ortswehr</button>
+    </div>`;
+}
+window.ortswehrLoeschenInline = async (id) => {
+  if (!confirm('Ortswehr wirklich löschen?')) return;
+  await fw.deleteDoc('ortswehren/'+id);
+  fw.toast('Gelöscht'); ladeOrtswehrenInline();
+};
+
+window.ortMigration = async () => {
+  const btn = document.getElementById('btn-ort-migration');
+  const res = document.getElementById('ort-migration-result');
+  btn.disabled = true;
+  res.textContent = '⏳ Prüfe Einsätze…';
+  try {
+    const snap = await fw.getDocs('einsaetze');
+    // Kein echter Einsatzort: kein Komma und keine Hausnummer (Muster: "Oegeln", "Beeskow" etc.)
+    const istKeinEchterOrt = (ort) => ort && !ort.includes(',') && !/\d/.test(ort);
+    const zuBereinigen = snap.docs.filter(d => istKeinEchterOrt(d.data().ort));
+    if (!zuBereinigen.length) { res.textContent = '✅ Nichts zu bereinigen.'; btn.disabled = false; return; }
+    for (const d of zuBereinigen) {
+      await fw.updateDoc('einsaetze/' + d.id, { ort: null });
+    }
+    res.textContent = `✅ ${zuBereinigen.length} Einsatz/Einsätze bereinigt.`;
+    fw.toast(`${zuBereinigen.length} Einsatzort(e) entfernt 🧹`);
+  } catch(e) { res.textContent = '❌ Fehler: ' + e.message; }
+  btn.disabled = false;
+};
+
+const QUALI_REIHENFOLGE = ['Truppmann','Sprechfunk','AGT','TH-Grund','Maschinist','Absturzsicherung','ABC-Grund','Truppführer','Gruppenführer','Zugführer','Wehrführer','Erste-Hilfe','Motorsäge A/B','Motorsäge C/D'];
+const QUALI_TRENNER_NACH = 'Wehrführer';
+
+function renderQualis(qualis, userId, u) {
+  if (!qualis.length) return '<p class="muted" style="font-size:0.85rem">Keine</p>';
+  // Bezeichnung normalisieren (trim + Groß-/Kleinschreibung)
+  const qualiIdx = (bez) => {
+    const b = (bez||'').trim();
+    const i = QUALI_REIHENFOLGE.findIndex(r => r.toLowerCase() === b.toLowerCase());
+    return i < 0 ? 99 : i;
+  };
+  const sorted = [...qualis].sort((a, b) => qualiIdx(a.bezeichnung) - qualiIdx(b.bezeichnung));
+  let html = '';
+  let trennerGezeigt = false;
+  const trennerIdx = QUALI_REIHENFOLGE.indexOf(QUALI_TRENNER_NACH);
+  for (const q of sorted) {
+    const istErsterNachTrenner = !trennerGezeigt && qualiIdx(q.bezeichnung) > trennerIdx;
+    if (istErsterNachTrenner) trennerGezeigt = true;
+    // AGT: Gültigkeit prüfen
+    let agtWarnung = '';
+    if ((q.bezeichnung||'').trim().toLowerCase() === 'agt') {
+      const heute = new Date();
+      const j3 = new Date(); j3.setFullYear(heute.getFullYear()-3);
+      const j1 = new Date(); j1.setFullYear(heute.getFullYear()-1);
+      const unt  = u.agt_untersuchung ? new Date(u.agt_untersuchung) : null;
+      const waer = u.agt_waermeuebung ? new Date(u.agt_waermeuebung) : null;
+      const bel  = u.agt_belastung    ? new Date(u.agt_belastung)    : null;
+      const ok = unt && unt >= j3 && waer && waer >= j1 && bel && bel >= j1;
+      const fehlt = [];
+      if (!unt || unt < j3) fehlt.push('G26-Untersuchung');
+      if (!waer || waer < j1) fehlt.push('Wärmeübung');
+      if (!bel  || bel  < j1) fehlt.push('Belastungsübung');
+      agtWarnung = ok
+        ? ' <span style="color:#22c55e;font-size:0.75rem">✅ aktiv</span>'
+        : ` <span style="color:#f59e0b;font-size:0.75rem" title="${fehlt.join(', ')}">⚠️ nicht aktiv</span>`;
+    }
+    // Erste-Hilfe: 2 Jahre Gültigkeit
+    if ((q.bezeichnung||'').trim().toLowerCase() === 'erste-hilfe' && q.datum) {
+      const ablauf = new Date(q.datum?.toDate ? q.datum.toDate() : q.datum);
+      ablauf.setFullYear(ablauf.getFullYear() + 2);
+      const heute = new Date();
+      const baldAblaufend = new Date(); baldAblaufend.setMonth(heute.getMonth() + 3);
+      if (ablauf < heute) {
+        agtWarnung = ` <span style="color:#ef4444;font-size:0.75rem">⚠️ abgelaufen (${datum(ablauf)})</span>`;
+      } else if (ablauf < baldAblaufend) {
+        agtWarnung = ` <span style="color:#f59e0b;font-size:0.75rem">⚠️ läuft ab ${datum(ablauf)}</span>`;
+      } else {
+        agtWarnung = ` <span style="color:#22c55e;font-size:0.75rem">✅ bis ${datum(ablauf)}</span>`;
+      }
+    }
+    html += `<div class="list-item" style="border-bottom:1px solid var(--border);${istErsterNachTrenner?'margin-top:0':''}">
+      <div class="list-item-body">
+        <div class="list-item-title">${q.bezeichnung}${agtWarnung}</div>
+        <div class="list-item-sub">${q.datum?datum(q.datum):'Kein Datum'}${q.bemerkung?' · '+q.bemerkung:''}
+        </div>
+      </div>
+      <button class="btn btn-sm btn-danger" onclick="qualiLoeschen('${userId}','${q.id}')">🗑</button>
+    </div>`;
+  }
+  return html;
+}
+
+function renderAgtFelder(u, id, qualis) {
+  const hatAgt = (qualis||[]).some(q => (q.bezeichnung||'').trim().toLowerCase() === 'agt');
+  if (!hatAgt) return '';
+  return `<div class="card">
+    <div class="card-title">AGT-Nachweise</div>
+    <div class="card-muted" style="font-size:0.82rem;margin-bottom:0.6rem">Für aktive AGT-Tauglichkeit erforderlich: G26 ≤ 3 Jahre · Wärme- und Belastungsübung ≤ 1 Jahr</div>
+    <div class="form-row"><label>G26-Untersuchung</label><input type="date" id="agt-unt" value="${u.agt_untersuchung||''}"></div>
+    <div class="form-row"><label>Wärmeübung</label><input type="date" id="agt-waer" value="${u.agt_waermeuebung||''}"></div>
+    <div class="form-row"><label>Belastungsübung</label><input type="date" id="agt-bel" value="${u.agt_belastung||''}"></div>
+    <button class="btn btn-primary btn-sm" style="margin-top:0.3rem" onclick="agtSpeichern('${id}')">💾 AGT-Daten speichern</button>
+  </div>`;
+}
+
+registerPage('kamerad-detail', async (el, {id}) => {
+  const snap = await fw.getDoc('users/'+id);
+  if (!snap.exists()) { el.innerHTML='<div class="empty">Nicht gefunden</div>'; return; }
+  const u = {id,...snap.data()};
+  fw.setTitle(u.vorname+' '+u.nachname);
+  fw.showBack(() => navigateBack());
+  fw.showHeaderAction('✏️ Edit', () => navigate('kamerad-form',{id}));
+
+  const [aSnap, qSnap, ortSnap, planSnap] = await Promise.all([
+    fw.getDocs('anwesenheiten', fw.where('userId','==',id)),
+    fw.getDocs('users/'+id+'/qualifikationen'),
+    u.ortswehrId ? fw.getDoc('ortswehren/'+u.ortswehrId) : Promise.resolve(null),
+    fw.getDocs('lehrgangsplanung', fw.where('userId','==',id)),
+  ]);
+  const stats    = getStats(aSnap.docs.map(d => d.data()));
+  const qualis   = qSnap.docs.map(d => ({id:d.id,...d.data()}));
+  const planung  = planSnap.docs.map(d => ({id:d.id,...d.data()}));
+  const wehrName = ortSnap?.exists?.() ? ortSnap.data().name : '–';
+
+  // Geplante Lehrgänge die noch nicht in qualis sind
+  const vorhandeneBezeichnungen = new Set(qualis.map(q => (q.bezeichnung||'').toLowerCase()));
+  const geplanteNeu = planung.filter(p => !vorhandeneBezeichnungen.has((p.lehrgang||'').toLowerCase()));
+
+  const planungHtml = geplanteNeu.length ? `
+    <div class="card">
+      <div class="card-title">Geplante Lehrgänge</div>
+      ${geplanteNeu.map(p => `
+        <div class="list-item" style="border-bottom:1px solid var(--border)">
+          <div class="list-item-body">
+            <div class="list-item-title">${p.lehrgang}</div>
+            <div class="list-item-sub">${p.startdatum ? datum(p.startdatum) : (p.jahr ? p.jahr : '–')}${p.bemerkung?' · '+p.bemerkung:''}</div>
+          </div>
+          <span class="badge badge-blue">geplant</span>
+        </div>`).join('')}
+    </div>` : '';
+
+  el.innerHTML = `
+    <div class="card" style="display:flex;align-items:center;gap:0.8rem;padding:0.9rem 1rem">
+      <div style="font-size:1.4rem">${stats.ziel?'✅':'⚠️'}</div>
+      <div>
+        <div style="font-weight:600;font-size:0.95rem">${stats.ziel?'40-Stunden-Ziel erreicht':'40-Stunden-Ziel nicht erreicht'}</div>
+        <div style="font-size:0.8rem;color:var(--muted);margin-top:0.1rem">${dauerFormat(stats.stunden12m)}h dieses Jahr · ${dauerFormat(stats.stunden12mZiel)}h / 40:00h (12 Mon.)</div>
+      </div>
+    </div>
+    <div class="stats-grid">
+      <div class="stat-card"><div class="stat-zahl">${dauerFormat(stats.gesamtEinsatz)}h</div><div class="stat-label">Einsatzstunden ${new Date().getFullYear()}</div></div>
+      <div class="stat-card"><div class="stat-zahl">${stats.einsaetze}</div><div class="stat-label">${stats.einsaetze===1?'Einsatz':'Einsätze'} ${new Date().getFullYear()}</div></div>
+      <div class="stat-card"><div class="stat-zahl">${dauerFormat(stats.gesamtDienst)}h</div><div class="stat-label">Dienststunden ${new Date().getFullYear()}</div></div>
+      <div class="stat-card"><div class="stat-zahl">${stats.dienste}</div><div class="stat-label">${stats.dienste===1?'Dienst':'Dienste'} ${new Date().getFullYear()}</div></div>
+    </div>
+    <div class="card">
+      <div class="card-title">Stammdaten</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:0.7rem">
+        ${[['Dienstgrad',u.dienstgrad],['Ortswehr',wehrName],
+           ['Eingetreten',datum(u.eintrittsdatum)],
+           ['Führerschein',u.fuehrerschein],
+        ].map(([l,v]) => `<div><div class="muted" style="font-size:0.72rem">${l}</div><div style="font-size:0.88rem">${v||'–'}</div></div>`).join('')}
+      </div>
+    </div>
+    <div class="card">
+      <div class="card-title">Lehrgänge</div>
+      ${renderQualis(qualis, id, u)}
+    </div>
+    ${planungHtml}
+    ${renderAgtFelder(u, id, qualis)}
+    <div class="card" style="display:flex;flex-direction:column;gap:0.5rem">
+      ${u.aktiv === false
+        ? `<button class="btn btn-primary btn-full" onclick="kameradAktiv('${id}')">✅ Kamerad aktiv setzen</button>`
+        : `<button class="btn btn-secondary btn-full" onclick="kameradInaktiv('${id}')">🔕 Kamerad inaktiv setzen</button>`
+      }
+      <button class="btn btn-danger btn-full" onclick="kameradLoeschen('${id}')">🗑 Kamerad vollständig löschen</button>
+    </div>`;
+});
+
+window.kameradAktiv = async (id) => {
+  await fw.updateDoc('users/'+id, { aktiv: true });
+  fw.toast('Kamerad aktiv gesetzt ✅'); navigate('kamerad-detail', {id});
+};
+
+window.kameradInaktiv = async (id) => {
+  if (!confirm('Kamerad auf inaktiv setzen?')) return;
+  await fw.updateDoc('users/'+id, { aktiv: false });
+  fw.toast('Kamerad inaktiv gesetzt ✅'); navigate('kamerad-detail', {id});
+};
+
+window.kameradLoeschen = async (id) => {
+  if (!confirm('Kamerad VOLLSTÄNDIG löschen? Dies kann nicht rückgängig gemacht werden!')) return;
+  if (!confirm('Wirklich? Alle Daten dieses Kameraden werden gelöscht!')) return;
+  // Qualifikationen löschen
+  const qSnap = await fw.getDocs('users/'+id+'/qualifikationen');
+  await Promise.all(qSnap.docs.map(d => fw.deleteDoc('users/'+id+'/qualifikationen/'+d.id)));
+  // Anwesenheiten löschen
+  const aSnap = await fw.getDocs('anwesenheiten', fw.where('userId','==',id));
+  await Promise.all(aSnap.docs.map(d => fw.deleteDoc('anwesenheiten/'+d.id)));
+  // Firestore-Dokument löschen
+  await fw.deleteDoc('users/'+id);
+  // Auth-Account löschen (über Cloud Function)
+  try {
+    const { getFunctions, httpsCallable } = await import('https://www.gstatic.com/firebasejs/10.8.0/firebase-functions.js');
+    const functions = getFunctions(fw.app, 'europe-west3');
+    await httpsCallable(functions, 'deleteAuthUser')({ uid: id });
+  } catch(e) {
+    fw.toast('Firestore gelöscht, Auth-Account konnte nicht entfernt werden: ' + e.message, true);
+    navigate('kameraden'); return;
+  }
+  fw.toast('Kamerad vollständig gelöscht ✅'); navigate('kameraden');
+};
+
+window.qualiHinzufuegen = async (userId) => {
+  const bez = document.getElementById('q-bez').value;
+  if (!bez) { fw.toast('Bitte einen Lehrgang wählen', true); return; }
+  const tage = parseInt(document.getElementById('q-tage')?.value) || null;
+  const stundenProTag = parseFloat(document.getElementById('q-stunden')?.value) || null;
+  await fw.addDoc('users/'+userId+'/qualifikationen', {
+    bezeichnung: bez,
+    datum: document.getElementById('q-dat').value || null,
+    tage,
+    stunden: (tage && stundenProTag) ? Math.round(tage * stundenProTag * 100) / 100 : null,
+    bemerkung: document.getElementById('q-bem').value || '',
+  });
+  fw.toast('Hinzugefügt'); navigate('kamerad-detail',{id:userId});
+};
+window.qualiLoeschen = async (userId, qualiId) => {
+  await fw.deleteDoc('users/'+userId+'/qualifikationen/'+qualiId);
+  fw.toast('Gelöscht'); navigate('kamerad-detail',{id:userId});
+};
+
+window.agtSpeichern = async (userId) => {
+  await fw.updateDoc('users/'+userId, {
+    agt_untersuchung: document.getElementById('agt-unt').value || null,
+    agt_waermeuebung: document.getElementById('agt-waer').value || null,
+    agt_belastung:    document.getElementById('agt-bel').value || null,
+  });
+  fw.toast('AGT-Daten gespeichert ✅'); navigate('kamerad-detail',{id:userId});
+};
+
+registerPage('kamerad-form', async (el, {id}) => {
+  let u = null;
+  if (id) { const s=await fw.getDoc('users/'+id); if(s.exists()) u={id,...s.data()}; }
+  fw.setTitle(u ? 'Bearbeiten' : 'Neuer Kamerad');
+  fw.showBack(() => id ? navigate('kamerad-detail',{id}) : navigate('kameraden'));
+
+  const owSnap = await fw.getDocs('ortswehren');
+  const ortswehren = owSnap.docs.map(d => ({id:d.id,...d.data()}));
+  const owOptions = ortswehren.map(o =>
+    `<option value="${o.id}" ${u?.ortswehrId===o.id?'selected':''}>${o.name}</option>`).join('');
+
+  const datumVal = u?.eintrittsdatum?.toDate ? u.eintrittsdatum.toDate().toISOString().slice(0,10) : (u?.eintrittsdatum||'');
+
+  el.innerHTML = `
+    <div class="card">
+      ${!u ? `
+        <div class="form-row"><label>Benutzername (wird Login)</label><input id="k-email" type="text" placeholder="vorname.nachname" autocapitalize="none"></div>
+        <div class="form-row"><label>Initiales Passwort (mind. 6 Zeichen)</label><input id="k-pw" type="password"></div>
+      ` : ''}
+      <div class="form-row"><label>Vorname</label><input id="k-vn" value="${u?.vorname||''}"></div>
+      <div class="form-row"><label>Nachname</label><input id="k-nn" value="${u?.nachname||''}"></div>
+      <div class="form-row"><label>Dienstgrad</label><select id="k-dg"><option value="">– wählen –</option><option value="Feuerwehrmann-Anwärter" ${u?.dienstgrad==="Feuerwehrmann-Anwärter"?"selected":""}>Feuerwehrmann-Anwärter</option><option value="Feuerwehrmann" ${u?.dienstgrad==="Feuerwehrmann"?"selected":""}>Feuerwehrmann</option><option value="Oberfeuerwehrmann" ${u?.dienstgrad==="Oberfeuerwehrmann"?"selected":""}>Oberfeuerwehrmann</option><option value="Hauptfeuerwehrmann" ${u?.dienstgrad==="Hauptfeuerwehrmann"?"selected":""}>Hauptfeuerwehrmann</option><option value="1. Hauptfeuerwehrmann" ${u?.dienstgrad==="1. Hauptfeuerwehrmann"?"selected":""}>1. Hauptfeuerwehrmann</option><option value="Löschmeister" ${u?.dienstgrad==="Löschmeister"?"selected":""}>Löschmeister</option><option value="Oberlöschmeister" ${u?.dienstgrad==="Oberlöschmeister"?"selected":""}>Oberlöschmeister</option><option value="Hauptlöschmeister" ${u?.dienstgrad==="Hauptlöschmeister"?"selected":""}>Hauptlöschmeister</option><option value="1. Hauptlöschmeister" ${u?.dienstgrad==="1. Hauptlöschmeister"?"selected":""}>1. Hauptlöschmeister</option><option value="Brandmeister" ${u?.dienstgrad==="Brandmeister"?"selected":""}>Brandmeister</option><option value="Oberbrandmeister" ${u?.dienstgrad==="Oberbrandmeister"?"selected":""}>Oberbrandmeister</option><option value="Hauptbrandmeister" ${u?.dienstgrad==="Hauptbrandmeister"?"selected":""}>Hauptbrandmeister</option><option value="1. Hauptbrandmeister" ${u?.dienstgrad==="1. Hauptbrandmeister"?"selected":""}>1. Hauptbrandmeister</option></select></div>
+      <div class="form-row"><label>Eintrittsdatum</label><input id="k-ed" type="date" value="${datumVal}"></div>
+      <div class="form-row"><label>Ortswehr</label>
+        <select id="k-ow">
+          <option value="">– Keine Zuordnung –</option>
+          ${owOptions}
+        </select>
+      </div>
+      <div class="form-row"><label>Rolle</label>
+        <select id="k-rolle" onchange="rolleGeaendert(this.value)">
+          <option value="kamerad" ${u?.rolle==='kamerad'?'selected':''}>Kamerad</option>
+          <option value="gruppenfuehrer" ${u?.rolle==='gruppenfuehrer'?'selected':''}>Gruppenführer</option>
+          <option value="zugfuehrer" ${u?.rolle==='zugfuehrer'?'selected':''}>Zugführer</option>
+          <option value="wehrfuehrer" ${u?.rolle==='wehrfuehrer'?'selected':''}>Wehrführer</option>
+        </select>
+        <div id="staerke-rolle-row" style="display:${u?.rolle==='wehrfuehrer'?'block':'none'};margin-top:0.5rem">
+          <label style="font-size:0.82rem;color:var(--muted)">Zählt in der Einsatzstärke als</label>
+          <select id="k-staerke-rolle">
+            <option value="kamerad" ${(u?.staerkeRolle||'kamerad')==='kamerad'?'selected':''}>Kamerad</option>
+            <option value="gruppenfuehrer" ${u?.staerkeRolle==='gruppenfuehrer'?'selected':''}>Gruppenführer</option>
+            <option value="zugfuehrer" ${u?.staerkeRolle==='zugfuehrer'?'selected':''}>Zugführer</option>
+          </select>
+        </div>
+      </div>
+      <div class="form-row"><label>Führerscheinklassen</label><input id="k-fs" value="${u?.fuehrerschein||''}"></div>
+      <div class="btn-row">
+        <button class="btn btn-primary" onclick="kameradSpeichern('${id||''}')">💾 Speichern</button>
+      </div>
+    </div>`;
+});
+
+window.kameradSpeichern = async (id) => {
+  const data = {
+    vorname: document.getElementById('k-vn').value,
+    nachname: document.getElementById('k-nn').value,
+    dienstgrad: document.getElementById('k-dg').value,
+    eintrittsdatum: document.getElementById('k-ed').value || null,
+    ortswehrId: document.getElementById('k-ow').value || null,
+    rolle: document.getElementById('k-rolle').value,
+    staerkeRolle: document.getElementById('k-rolle').value === 'wehrfuehrer'
+      ? (document.getElementById('k-staerke-rolle')?.value || 'kamerad')
+      : document.getElementById('k-rolle').value,
+    fuehrerschein: document.getElementById('k-fs').value,
+  };
+  try {
+    if (id) {
+      await fw.setDoc('users/'+id, data);
+      fw.toast('Gespeichert ✅'); navigate('kamerad-detail',{id});
+    } else {
+      const loginName = document.getElementById('k-email').value.trim().toLowerCase();
+      const pw = document.getElementById('k-pw').value;
+      if (!loginName||!pw) { fw.toast('Benutzername und Passwort erforderlich', true); return; }
+      if (pw.length < 6) { fw.toast('Passwort mind. 6 Zeichen', true); return; }
+      const email = loginName.includes('@') ? loginName : loginName + '@ffw-oegeln.de';
+      data.loginName = loginName;
+      await window.createKamerad(email, pw, data);
+      fw.toast('Kamerad angelegt ✅'); navigate('kameraden');
+    }
+  } catch(e) {
+    fw.toast(e.message.includes('email-already') ? 'Benutzername bereits vergeben' : e.message, true);
+  }
+};
+
+// ── Ortswehren ────────────────────────────────────────────
+registerPage('ortswehren', async (el) => {
+  fw.setTitle('Ortswehren');
+  fw.showHeaderAction('+ Neu', () => navigate('ortswehr-form', {}));
+  const snap = await fw.getDocs('ortswehren');
+  const wehren = snap.docs.map(d => ({id:d.id,...d.data()}));
+  el.innerHTML = `
+    <div class="card">
+      ${wehren.length===0 ? '<div class="empty">Noch keine Ortswehren angelegt.<br>Oben rechts auf "+ Neu" tippen.</div>' :
+        wehren.map(w => `
+          <div class="list-item" onclick="navigate('ortswehr-form',{id:'${w.id}'})">
+            <div class="list-item-icon">🏘️</div>
+            <div class="list-item-body">
+              <div class="list-item-title">${w.name}</div>
+              <div class="list-item-sub">${w.ort||''}</div>
+            </div>
+            <div class="list-chevron">›</div>
+          </div>`).join('')}
+    </div>`;
+});
+
+registerPage('ortswehr-form', async (el, {id}) => {
+  let w = null;
+  if (id) { const s=await fw.getDoc('ortswehren/'+id); if(s.exists()) w={id,...s.data()}; }
+  fw.setTitle(w ? 'Ortswehr bearbeiten' : 'Neue Ortswehr');
+  fw.showBack(() => navigateBack());
+  el.innerHTML = `
+    <div class="card">
+      <div class="form-row"><label>Name der Wehr</label><input id="ow-name" value="${w?.name||''}" placeholder="FFW Musterort"></div>
+      <div class="form-row"><label>Ort</label><input id="ow-ort" value="${w?.ort||''}" placeholder="Musterort"></div>
+      <div class="form-row"><label>Bemerkung</label><input id="ow-bem" value="${w?.bemerkung||''}"></div>
+      <div class="btn-row">
+        <button class="btn btn-primary" onclick="ortswehrSpeichern('${id||''}')">💾 Speichern</button>
+        ${w ? `<button class="btn btn-danger" onclick="ortswehrLoeschen('${id}')">🗑 Löschen</button>` : ''}
+      </div>
+    </div>`;
+});
+
+window.ortswehrSpeichern = async (id) => {
+  const data = {
+    name: document.getElementById('ow-name').value.trim(),
+    ort:  document.getElementById('ow-ort').value.trim(),
+    bemerkung: document.getElementById('ow-bem').value.trim(),
+  };
+  if (!data.name) { fw.toast('Name erforderlich', true); return; }
+  if (id) await fw.setDoc('ortswehren/'+id, data);
+  else    await fw.addDoc('ortswehren', {...data, erstelltAm: new Date()});
+  fw.toast('Gespeichert ✅'); navigate('ortswehren');
+};
+window.ortswehrLoeschen = async (id) => {
+  if (!confirm('Ortswehr löschen?')) return;
+  await fw.deleteDoc('ortswehren/'+id);
+  fw.toast('Gelöscht'); navigate('ortswehren');
+};
+
+}); // end waitFw
+
+// ── Fahrzeug- und Geräteprüfungen ─────────────────────────
+async function ladePruefaufgabenInline() {
+  const el = document.getElementById('pruef-inline');
+  if (!el) return;
+
+  const istWF = fw.isWehrfuehrer();
+  const ortswehrId = fw.profil?.ortswehrId;
+
+  // Fahrzeuge laden – WF sieht alle, Maschinist nur eigene Ortswehr
+  const fahrzeugSnap = istWF
+    ? await fw.getDocs('fahrzeuge', fw.orderBy('name','asc'))
+    : await fw.getDocs('fahrzeuge', fw.where('ortswehrId','==',ortswehrId), fw.orderBy('name','asc'));
+  const fahrzeuge = fahrzeugSnap.docs.map(d => ({id:d.id,...d.data()}));
+
+  // Alle Prüfaufgaben laden
+  const aufgabenSnap = await fw.getDocs('pruefaufgaben', fw.orderBy('bezeichnung','asc'));
+  const alleAufgaben = aufgabenSnap.docs.map(d => ({id:d.id,...d.data()}));
+
+  const heute = new Date(); heute.setHours(0,0,0,0);
+
+  function statusFarbe(a) {
+    if (!a.letztesPruefDatum) return '#f59e0b';
+    const letztes = a.letztesPruefDatum.toDate ? a.letztesPruefDatum.toDate() : new Date(a.letztesPruefDatum);
+    if (!a.intervall) return '#94a3b8';
+    const faellig = new Date(letztes); faellig.setMonth(faellig.getMonth() + a.intervall);
+    const warnung = new Date(faellig); warnung.setDate(warnung.getDate() - 14);
+    if (heute > faellig) return '#dc2626';
+    if (heute >= warnung) return '#f59e0b';
+    return '#22c55e';
+  }
+
+  function datumsAnzeige(a) {
+    if (!a.letztesPruefDatum) return 'Noch nie geprüft';
+    const d = a.letztesPruefDatum.toDate ? a.letztesPruefDatum.toDate() : new Date(a.letztesPruefDatum);
+    return d.toLocaleDateString('de-DE');
+  }
+
+  function aufgabenHtml(fahrzeugId) {
+    const aufgaben = alleAufgaben.filter(a => a.fahrzeugId === fahrzeugId);
+    if (aufgaben.length === 0) return '<p class="muted" style="font-size:0.82rem;padding:0.3rem 0">Keine Aufgaben</p>';
+    return aufgaben.map(a => `
+      <div style="display:flex;align-items:center;gap:0.6rem;padding:0.45rem 0;border-bottom:1px solid var(--border)">
+        <div style="width:10px;height:10px;border-radius:50%;flex-shrink:0;background:${statusFarbe(a)}"></div>
+        <div style="flex:1;min-width:0">
+          <div style="font-size:0.85rem;font-weight:600">${a.bezeichnung}</div>
+          <div style="font-size:0.73rem;color:var(--muted)">${datumsAnzeige(a)}${a.intervall ? ` · alle ${a.intervall} Mon.` : ''}</div>
+        </div>
+        <div style="display:flex;gap:0.3rem;flex-shrink:0">
+          <button class="btn btn-sm btn-secondary" style="font-size:0.7rem;padding:0.2rem 0.45rem" onclick="pruefDatumAktualisieren('${a.id}')">✅</button>
+          ${istWF ? `<button class="btn btn-sm btn-secondary" style="font-size:0.7rem;padding:0.2rem 0.45rem" onclick="navigate('pruefaufgabe-form',{id:'${a.id}'})">✏️</button>` : ''}
+        </div>
+      </div>`).join('');
+  }
+
+  if (fahrzeuge.length === 0) {
+    el.innerHTML = `<p class="muted" style="font-size:0.85rem">Noch keine Fahrzeuge</p>
+      ${istWF ? `<button class="btn btn-secondary btn-sm" style="margin-top:0.5rem" onclick="navigate('fahrzeug-form',{})">+ Fahrzeug hinzufügen</button>` : ''}`;
+    return;
+  }
+
+  el.innerHTML = fahrzeuge.map(f => `
+    <details style="margin-bottom:0.5rem;border:1px solid var(--border);border-radius:10px">
+      <summary style="padding:0.4rem 0.8rem;cursor:pointer;list-style:none;display:flex;align-items:center;justify-content:space-between;font-weight:600;font-size:13px;border-radius:8px">
+        <span>${f.name}${f.bezeichnung ? ` <span style="font-weight:400;color:var(--muted);font-size:0.8rem">(${f.bezeichnung})</span>` : ''}</span>
+        <div style="display:flex;gap:0.4rem;align-items:center">
+          ${istWF ? `<button class="btn btn-sm btn-secondary" style="font-size:0.65rem;padding:0.15rem 0.4rem" onclick="event.stopPropagation();navigate('fahrzeug-form',{id:'${f.id}'})">✏️</button>
+          <button class="btn btn-sm btn-secondary" style="font-size:0.65rem;padding:0.15rem 0.4rem" onclick="event.stopPropagation();navigate('pruefaufgabe-form',{fahrzeugId:'${f.id}'})">+</button>` : ''}
+          <span style="color:var(--muted)">▾</span>
+        </div>
+      </summary>
+      <div style="padding:0 0.8rem 0.8rem">${aufgabenHtml(f.id)}</div>
+    </details>`).join('') +
+    (istWF ? `<button class="btn btn-secondary btn-sm" style="margin-top:0.5rem" onclick="navigate('fahrzeug-form',{})">+ Fahrzeug hinzufügen</button>` : '');
+}
+
+window.pruefDatumAktualisieren = async (id) => {
+  if (!confirm('Prüfung heute als durchgeführt markieren?')) return;
+  await fw.setDoc('pruefaufgaben/'+id, { letztesPruefDatum: new Date() });
+  fw.toast('Prüfung aktualisiert ✅');
+  ladePruefaufgabenInline();
+};
+
+// ── Fahrzeug Form ─────────────────────────────────────────
+registerPage('fahrzeug-form', async (el, {id}) => {
+  if (!fw.isWehrfuehrer()) { el.innerHTML = '<div class="empty">Keine Berechtigung</div>'; return; }
+  fw.setTitle(id ? 'Fahrzeug bearbeiten' : 'Neues Fahrzeug');
+  fw.showBack(() => navigateBack());
+
+  let fahrzeug = null;
+  if (id) {
+    const snap = await fw.getDoc('fahrzeuge/'+id);
+    if (snap.exists()) fahrzeug = {id, ...snap.data()};
+  }
+
+  // Ortswehren für Dropdown laden
+  const wehrSnap = await fw.getDocs('ortswehren', fw.orderBy('name','asc'));
+  const wehren = wehrSnap.docs.map(d => ({id:d.id,...d.data()}));
+
+  el.innerHTML = `
+    <div class="card">
+      <div class="form-row">
+        <label>Fahrzeugkennung (z.B. 1/48/6)</label>
+        <input id="fz-name" value="${fahrzeug?.name||''}">
+      </div>
+      <div class="form-row">
+        <label>Bezeichnung (z.B. ZF-16)</label>
+        <input id="fz-bez" value="${fahrzeug?.bezeichnung||''}">
+      </div>
+      <div class="form-row">
+        <label>Ortswehr</label>
+        <select id="fz-wehr">
+          <option value="">– Bitte wählen –</option>
+          ${wehren.map(w => `<option value="${w.id}" ${fahrzeug?.ortswehrId===w.id?'selected':''}>${w.name}</option>`).join('')}
+        </select>
+      </div>
+      <div class="btn-row" style="margin-top:0.5rem">
+        <button class="btn btn-primary" onclick="fahrzeugSpeichern('${id||''}')">💾 Speichern</button>
+        ${id ? `<button class="btn btn-danger" onclick="fahrzeugLoeschen('${id}')">🗑 Löschen</button>` : ''}
+      </div>
+    </div>
+  `;
+});
+
+window.fahrzeugSpeichern = async (id) => {
+  const name = document.getElementById('fz-name').value.trim();
+  const bez  = document.getElementById('fz-bez').value.trim();
+  const wehr = document.getElementById('fz-wehr').value;
+  if (!name) { fw.toast('Fahrzeugkennung fehlt', true); return; }
+  const data = { name, bezeichnung: bez, ortswehrId: wehr || null };
+  if (id) { await fw.setDoc('fahrzeuge/'+id, data); }
+  else    { await fw.addDoc('fahrzeuge', data); }
+  fw.toast('Gespeichert ✅');
+  navigate('dienste');
+};
+
+window.fahrzeugLoeschen = async (id) => {
+  if (!confirm('Fahrzeug wirklich löschen? Zugehörige Aufgaben bleiben erhalten.')) return;
+  await fw.deleteDoc('fahrzeuge/'+id);
+  fw.toast('Gelöscht');
+  navigate('dienste');
+};
+
+// ── Prüfaufgabe Form ──────────────────────────────────────
+registerPage('pruefaufgabe-form', async (el, {id, fahrzeugId: vorFahrzeugId}) => {
+  if (!fw.isWehrfuehrer()) { el.innerHTML = '<div class="empty">Keine Berechtigung</div>'; return; }
+  fw.setTitle(id ? 'Aufgabe bearbeiten' : 'Neue Aufgabe');
+  fw.showBack(() => navigateBack());
+
+  let aufgabe = null;
+  if (id) {
+    const snap = await fw.getDoc('pruefaufgaben/'+id);
+    if (snap.exists()) aufgabe = {id, ...snap.data()};
+  }
+
+  const letztesDatum = aufgabe?.letztesPruefDatum
+    ? (aufgabe.letztesPruefDatum.toDate ? aufgabe.letztesPruefDatum.toDate() : new Date(aufgabe.letztesPruefDatum)).toISOString().split('T')[0]
+    : '';
+
+  const fzSnap = await fw.getDocs('fahrzeuge', fw.orderBy('name','asc'));
+  const fahrzeuge = fzSnap.docs.map(d => ({id:d.id,...d.data()}));
+  const aktivFahrzeugId = aufgabe?.fahrzeugId || vorFahrzeugId || '';
+
+  el.innerHTML = `
+    <div class="card">
+      <div class="form-row">
+        <label>Fahrzeug</label>
+        <select id="pa-fz">
+          <option value="">– Bitte wählen –</option>
+          ${fahrzeuge.map(f => `<option value="${f.id}" ${aktivFahrzeugId===f.id?'selected':''}>${f.name}${f.bezeichnung?' ('+f.bezeichnung+')':''}</option>`).join('')}
+        </select>
+      </div>
+      <div class="form-row"><label>Bezeichnung</label><input id="pa-bez" value="${aufgabe?.bezeichnung||''}"></div>
+      <div class="form-row"><label>Intervall (Monate)</label><input id="pa-int" type="number" min="1" value="${aufgabe?.intervall||''}"></div>
+      <div class="form-row"><label>Letztes Prüfdatum</label><input id="pa-dat" type="date" value="${letztesDatum}"></div>
+      <div class="btn-row" style="margin-top:0.5rem">
+        <button class="btn btn-primary" onclick="pruefaufgabeSpeichern('${id||''}')">💾 Speichern</button>
+        ${id ? `<button class="btn btn-danger" onclick="pruefaufgabeLoeschen('${id}')">🗑 Löschen</button>` : ''}
+      </div>
+    </div>
+  `;
+});
+
+window.pruefaufgabeSpeichern = async (id) => {
+  const fzId = document.getElementById('pa-fz').value;
+  const bez  = document.getElementById('pa-bez').value.trim();
+  const int  = parseInt(document.getElementById('pa-int').value) || null;
+  const datStr = document.getElementById('pa-dat').value;
+  if (!bez) { fw.toast('Bezeichnung fehlt', true); return; }
+  if (!fzId) { fw.toast('Fahrzeug fehlt', true); return; }
+  const data = { bezeichnung: bez, intervall: int, fahrzeugId: fzId, letztesPruefDatum: datStr ? new Date(datStr) : null };
+  if (id) { await fw.setDoc('pruefaufgaben/'+id, data); }
+  else    { await fw.addDoc('pruefaufgaben', data); }
+  fw.toast('Gespeichert ✅');
+  navigate('dienste');
+};
+
+window.pruefaufgabeLoeschen = async (id) => {
+  if (!confirm('Aufgabe wirklich löschen?')) return;
+  await fw.deleteDoc('pruefaufgaben/'+id);
+  fw.toast('Gelöscht');
+  navigate('dienste');
+};
+
+window.pruefDatumAktualisieren = async (id) => {
+  if (!confirm('Prüfung heute als durchgeführt markieren?')) return;
+  await fw.setDoc('pruefaufgaben/'+id, { letztesPruefDatum: new Date() });
+  fw.toast('Prüfung aktualisiert ✅');
+  ladePruefaufgabenInline();
+};
+
+// ── Fahrzeug Form ─────────────────────────────────────────
+registerPage('fahrzeug-form', async (el, {id}) => {
+  if (!fw.isWehrfuehrer()) { el.innerHTML = '<div class="empty">Keine Berechtigung</div>'; return; }
+  fw.setTitle(id ? 'Fahrzeug bearbeiten' : 'Neues Fahrzeug');
+  fw.showBack(() => navigateBack());
+
+  let fahrzeug = null;
+  if (id) {
+    const snap = await fw.getDoc('fahrzeuge/'+id);
+    if (snap.exists()) fahrzeug = {id, ...snap.data()};
+  }
+
+  // Ortswehren für Dropdown laden
+  const wehrSnap = await fw.getDocs('ortswehren', fw.orderBy('name','asc'));
+  const wehren = wehrSnap.docs.map(d => ({id:d.id,...d.data()}));
+
+  el.innerHTML = `
+    <div class="card">
+      <div class="form-row">
+        <label>Fahrzeugkennung (z.B. 1/48/6)</label>
+        <input id="fz-name" value="${fahrzeug?.name||''}">
+      </div>
+      <div class="form-row">
+        <label>Bezeichnung (z.B. ZF-16)</label>
+        <input id="fz-bez" value="${fahrzeug?.bezeichnung||''}">
+      </div>
+      <div class="form-row">
+        <label>Ortswehr</label>
+        <select id="fz-wehr">
+          <option value="">– Bitte wählen –</option>
+          ${wehren.map(w => `<option value="${w.id}" ${fahrzeug?.ortswehrId===w.id?'selected':''}>${w.name}</option>`).join('')}
+        </select>
+      </div>
+      <div class="btn-row" style="margin-top:0.5rem">
+        <button class="btn btn-primary" onclick="fahrzeugSpeichern('${id||''}')">💾 Speichern</button>
+        ${id ? `<button class="btn btn-danger" onclick="fahrzeugLoeschen('${id}')">🗑 Löschen</button>` : ''}
+      </div>
+    </div>
+  `;
+});
+
+window.fahrzeugSpeichern = async (id) => {
+  const name = document.getElementById('fz-name').value.trim();
+  const bez  = document.getElementById('fz-bez').value.trim();
+  const wehr = document.getElementById('fz-wehr').value;
+  if (!name) { fw.toast('Fahrzeugkennung fehlt', true); return; }
+  const data = { name, bezeichnung: bez, ortswehrId: wehr || null };
+  if (id) { await fw.setDoc('fahrzeuge/'+id, data); }
+  else    { await fw.addDoc('fahrzeuge', data); }
+  fw.toast('Gespeichert ✅');
+  navigate('dienste');
+};
+
+window.fahrzeugLoeschen = async (id) => {
+  if (!confirm('Fahrzeug wirklich löschen? Zugehörige Aufgaben bleiben erhalten.')) return;
+  await fw.deleteDoc('fahrzeuge/'+id);
+  fw.toast('Gelöscht');
+  navigate('dienste');
+};
+
+// ── Prüfaufgabe Form ──────────────────────────────────────
+registerPage('pruefaufgabe-form', async (el, {id, fahrzeugId: vorFahrzeugId}) => {
+  if (!fw.isWehrfuehrer()) { el.innerHTML = '<div class="empty">Keine Berechtigung</div>'; return; }
+  fw.setTitle(id ? 'Aufgabe bearbeiten' : 'Neue Aufgabe');
+  fw.showBack(() => navigateBack());
+
+  let aufgabe = null;
+  if (id) {
+    const snap = await fw.getDoc('pruefaufgaben/'+id);
+    if (snap.exists()) aufgabe = {id, ...snap.data()};
+  }
+
+  const letztesDatum = aufgabe?.letztesPruefDatum
+    ? (aufgabe.letztesPruefDatum.toDate ? aufgabe.letztesPruefDatum.toDate() : new Date(aufgabe.letztesPruefDatum)).toISOString().split('T')[0]
+    : '';
+
+  const fzSnap = await fw.getDocs('fahrzeuge', fw.orderBy('name','asc'));
+  const fahrzeuge = fzSnap.docs.map(d => ({id:d.id,...d.data()}));
+  const aktivFahrzeugId = aufgabe?.fahrzeugId || vorFahrzeugId || '';
+
+  el.innerHTML = `
+    <div class="card">
+      <div class="form-row">
+        <label>Fahrzeug</label>
+        <select id="pa-fz">
+          <option value="">– Bitte wählen –</option>
+          ${fahrzeuge.map(f => `<option value="${f.id}" ${aktivFahrzeugId===f.id?'selected':''}>${f.name}${f.bezeichnung?' ('+f.bezeichnung+')':''}</option>`).join('')}
+        </select>
+      </div>
+      <div class="form-row"><label>Bezeichnung</label><input id="pa-bez" value="${aufgabe?.bezeichnung||''}"></div>
+      <div class="form-row"><label>Intervall (Monate)</label><input id="pa-int" type="number" min="1" value="${aufgabe?.intervall||''}"></div>
+      <div class="form-row"><label>Letztes Prüfdatum</label><input id="pa-dat" type="date" value="${letztesDatum}"></div>
+      <div class="btn-row" style="margin-top:0.5rem">
+        <button class="btn btn-primary" onclick="pruefaufgabeSpeichern('${id||''}')">💾 Speichern</button>
+        ${id ? `<button class="btn btn-danger" onclick="pruefaufgabeLoeschen('${id}')">🗑 Löschen</button>` : ''}
+      </div>
+    </div>
+  `;
+});
+
+window.pruefaufgabeSpeichern = async (id) => {
+  const fzId = document.getElementById('pa-fz').value;
+  const bez  = document.getElementById('pa-bez').value.trim();
+  const int  = parseInt(document.getElementById('pa-int').value) || null;
+  const datStr = document.getElementById('pa-dat').value;
+  if (!bez) { fw.toast('Bezeichnung fehlt', true); return; }
+  if (!fzId) { fw.toast('Fahrzeug fehlt', true); return; }
+  const data = { bezeichnung: bez, intervall: int, fahrzeugId: fzId, letztesPruefDatum: datStr ? new Date(datStr) : null };
+  if (id) { await fw.setDoc('pruefaufgaben/'+id, data); }
+  else    { await fw.addDoc('pruefaufgaben', data); }
+  fw.toast('Gespeichert ✅');
+  navigate('dienste');
+};
+
+window.pruefaufgabeLoeschen = async (id) => {
+  if (!confirm('Aufgabe wirklich löschen?')) return;
+  await fw.deleteDoc('pruefaufgaben/'+id);
+  fw.toast('Gelöscht');
+  navigate('dienste');
+};
+
+

@@ -1047,7 +1047,7 @@ registerPage('uebung-form', async (el, {id, typ: vorTyp, alarm: mitAlarm}) => {
       </div>
       <div class="card" id="pieper-scanner-card">
         <div style="font-size:0.8rem;font-weight:600;color:var(--muted);margin-bottom:0.5rem">📟 PIEPER SCANNEN (optional)</div>
-        <div style="position:relative;background:#000;border-radius:8px;overflow:hidden;aspect-ratio:4/3;cursor:pointer" onclick="piperVideoTippen()">
+        <div style="position:relative;background:#000;border-radius:8px;overflow:hidden;aspect-ratio:4/3;cursor:pointer" onclick="piperVideoTippen(event)">
           <video id="pieper-video" autoplay playsinline muted style="width:100%;height:100%;object-fit:cover"></video>
           <!-- Ausschnitt-Rahmen: nur Rand, kein dunkler Overlay -->
           <div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;pointer-events:none">
@@ -2870,19 +2870,34 @@ window.piperKameraStarten = async () => {
   }
 };
 
-// Antippen: Kamera starten ODER kurz warten für Fokus dann Scan
-window.piperVideoTippen = async () => {
+// Antippen: Kamera starten ODER Tap-to-Focus via Java dann Scan
+window.piperVideoTippen = (event) => {
   if (!_piperStream) {
     piperKameraStarten();
     return;
   }
-  // Fokus-Indikator anzeigen
+
+  // Tap-Koordinaten relativ zum Video-Element berechnen
+  const video = document.getElementById('pieper-video');
+  const rect  = video.getBoundingClientRect();
+  const x = (event.clientX - rect.left)  / rect.width;
+  const y = (event.clientY - rect.top)   / rect.height;
+
   const hint = document.getElementById('pieper-hint');
-  if (hint) hint.textContent = '🔍 Fokussiert…';
-  // 800ms warten damit die Kamera fokussieren kann
-  await new Promise(r => setTimeout(r, 800));
-  if (hint) hint.textContent = 'Antippen zum Scannen';
-  piperScan();
+
+  // Native Tap-to-Focus verfügbar?
+  if (typeof PieperScan !== 'undefined' && PieperScan.setFocusPoint) {
+    if (hint) hint.textContent = '🔍 Fokussiert…';
+    const cbId = 'f' + Date.now();
+    window.__pieperFocusDone = (callbackId, success) => {
+      if (hint) hint.textContent = 'Antippen zum Scannen';
+      piperScan();
+    };
+    PieperScan.setFocusPoint(x, y, cbId);
+  } else {
+    // Fallback: direkt scannen
+    piperScan();
+  }
 };
 
 window.piperScan = () => {

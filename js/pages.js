@@ -1037,12 +1037,12 @@ registerPage('uebung-form', async (el, {id, typ: vorTyp, alarm: mitAlarm}) => {
         </div>
         ${u ? `<button class="btn btn-secondary btn-full" style="margin-bottom:0.75rem" onclick="einsatzNachbenachrichtigen('${id}')">🔔 Benachrichtigung erneut senden</button>` : ''}
         <input id="f-titel" value="${u?.titel||''}" placeholder="Einsatzstichwort" style="margin-bottom:0.5rem" autofocus>
-        <div style="display:flex;gap:0.5rem;margin-bottom:0.5rem">
-          <input id="f-beginn" type="time" value="${u?.zeitBeginn||jetztZeit}" style="flex:1">
-          <input id="f-ende" type="time" value="${u?.zeitEnde||''}" placeholder="Ende (opt.)" style="flex:1">
-        </div>
-        <div class="ac-wrapper" style="position:relative">
+        <div class="ac-wrapper" style="position:relative;margin-bottom:0.5rem">
           <input id="f-ort" value="${u?.ort||''}" placeholder="Einsatzort / Adresse (optional)">
+        </div>
+        <div style="display:flex;gap:0.5rem">
+          <input id="f-beginn" type="time" value="${u?.zeitBeginn||jetztZeit}" style="flex:1">
+          <input id="f-ende" type="time" value="${u?.zeitEnde||''}" placeholder="Ende (optional)" style="flex:1">
         </div>
       </div>
       <div class="card" id="pieper-scanner-card">
@@ -2894,8 +2894,8 @@ window.piperScan = () => {
   canvas.height = cropH * scale;
   const ctx = canvas.getContext('2d');
 
-  // Kontrast + Helligkeit vor dem Zeichnen
-  ctx.filter = 'contrast(1.8) brightness(1.15) saturate(0)';
+  // Kontrast für Swissphone LCD: dunkel auf hell, leicht überbelichtet
+  ctx.filter = 'contrast(1.4) brightness(0.85) saturate(0)';
   ctx.drawImage(video, cropX, cropY, cropW, cropH, 0, 0, canvas.width, canvas.height);
 
   const b64 = canvas.toDataURL('image/jpeg', 1.0).split(',')[1];

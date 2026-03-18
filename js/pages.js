@@ -2472,11 +2472,11 @@ registerPage('kamerad-form', async (el, {id}) => {
   el.innerHTML = `
     <div class="card">
       ${!u ? `
-        <div class="form-row"><label>Benutzername (wird Login)</label><input id="k-email" type="text" placeholder="vorname.nachname" autocapitalize="none"></div>
         <div class="form-row"><label>Initiales Passwort (mind. 6 Zeichen)</label><input id="k-pw" type="password"></div>
       ` : ''}
-      <div class="form-row"><label>Vorname</label><input id="k-vn" value="${u?.vorname||''}"></div>
-      <div class="form-row"><label>Nachname</label><input id="k-nn" value="${u?.nachname||''}"></div>
+      <div class="form-row"><label>Vorname</label><input id="k-vn" value="${u?.vorname||\'\'}" ${!u ? 'oninput="kameradLoginAktualisieren()"' : ''}></div>
+      <div class="form-row"><label>Nachname</label><input id="k-nn" value="${u?.nachname||\'\'}" ${!u ? 'oninput="kameradLoginAktualisieren()"' : ''}></div>
+      ${!u ? `<div class="form-row"><label>Benutzername (Login)</label><input id="k-email" type="text" readonly style="color:var(--muted)" placeholder="wird automatisch generiert"></div>` : ''}
       <div class="form-row"><label>Dienstgrad</label><select id="k-dg"><option value="">– wählen –</option><option value="Feuerwehrmann-Anwärter" ${u?.dienstgrad==="Feuerwehrmann-Anwärter"?"selected":""}>Feuerwehrmann-Anwärter</option><option value="Feuerwehrmann" ${u?.dienstgrad==="Feuerwehrmann"?"selected":""}>Feuerwehrmann</option><option value="Oberfeuerwehrmann" ${u?.dienstgrad==="Oberfeuerwehrmann"?"selected":""}>Oberfeuerwehrmann</option><option value="Hauptfeuerwehrmann" ${u?.dienstgrad==="Hauptfeuerwehrmann"?"selected":""}>Hauptfeuerwehrmann</option><option value="1. Hauptfeuerwehrmann" ${u?.dienstgrad==="1. Hauptfeuerwehrmann"?"selected":""}>1. Hauptfeuerwehrmann</option><option value="Löschmeister" ${u?.dienstgrad==="Löschmeister"?"selected":""}>Löschmeister</option><option value="Oberlöschmeister" ${u?.dienstgrad==="Oberlöschmeister"?"selected":""}>Oberlöschmeister</option><option value="Hauptlöschmeister" ${u?.dienstgrad==="Hauptlöschmeister"?"selected":""}>Hauptlöschmeister</option><option value="1. Hauptlöschmeister" ${u?.dienstgrad==="1. Hauptlöschmeister"?"selected":""}>1. Hauptlöschmeister</option><option value="Brandmeister" ${u?.dienstgrad==="Brandmeister"?"selected":""}>Brandmeister</option><option value="Oberbrandmeister" ${u?.dienstgrad==="Oberbrandmeister"?"selected":""}>Oberbrandmeister</option><option value="Hauptbrandmeister" ${u?.dienstgrad==="Hauptbrandmeister"?"selected":""}>Hauptbrandmeister</option><option value="1. Hauptbrandmeister" ${u?.dienstgrad==="1. Hauptbrandmeister"?"selected":""}>1. Hauptbrandmeister</option></select></div>
       <div class="form-row"><label>Eintrittsdatum</label><input id="k-ed" type="date" value="${datumVal}"></div>
       <div class="form-row"><label>Ortswehr</label>
@@ -2508,6 +2508,31 @@ registerPage('kamerad-form', async (el, {id}) => {
     </div>`;
 });
 
+// ── Login-Name Generierung ────────────────────────────────
+function generiereLoginBasis(vorname, nachname) {
+  const v = (vorname || '').trim().toLowerCase().replace(/[^a-zäöüß]/g, '');
+  const n = (nachname || '').trim().toLowerCase().replace(/[^a-zäöüß]/g, '');
+  if (!v || !n) return '';
+  return v[0] + n;
+}
+
+window.kameradLoginAktualisieren = async () => {
+  const vn = document.getElementById('k-vn')?.value || '';
+  const nn = document.getElementById('k-nn')?.value || '';
+  const el = document.getElementById('k-email');
+  if (!el) return;
+  const basis = generiereLoginBasis(vn, nn);
+  if (!basis) { el.value = ''; return; }
+
+  // Duplikat-Check gegen Firestore
+  const snap = await fw.getDocs('users', fw.where('loginName', '>=', basis), fw.where('loginName', '<', basis + '\uf8ff'));
+  const existing = snap.docs.map(d => d.data().loginName).filter(Boolean);
+  let login = basis;
+  let i = 2;
+  while (existing.includes(login)) { login = basis + i; i++; }
+  el.value = login;
+};
+
 window.kameradSpeichern = async (id) => {
   const data = {
     vorname: document.getElementById('k-vn').value,
@@ -2528,9 +2553,9 @@ window.kameradSpeichern = async (id) => {
     } else {
       const loginName = document.getElementById('k-email').value.trim().toLowerCase();
       const pw = document.getElementById('k-pw').value;
-      if (!loginName||!pw) { fw.toast('Benutzername und Passwort erforderlich', true); return; }
+      if (!loginName||!pw) { fw.toast('Bitte zuerst Vor- und Nachname eintragen', true); return; }
       if (pw.length < 6) { fw.toast('Passwort mind. 6 Zeichen', true); return; }
-      const email = loginName.includes('@') ? loginName : loginName + '@ffw-oegeln.de';
+      const email = loginName + '@ffw-oegeln.de';
       data.loginName = loginName;
       await window.createKamerad(email, pw, data);
       fw.toast('Kamerad angelegt ✅'); navigate('kameraden');

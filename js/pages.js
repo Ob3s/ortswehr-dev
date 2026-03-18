@@ -2830,6 +2830,13 @@ window.piperCleanup = () => {
     if (typeof PieperScan !== 'undefined') PieperScan.stopCamera();
     _piperAktiv = false;
   }
+  // Scroll-Listener entfernen
+  if (window._piperScrollHandler) {
+    window.removeEventListener('scroll', window._piperScrollHandler);
+    const el = document.querySelector('.content-scroll, main, #main-content');
+    if (el) el.removeEventListener('scroll', window._piperScrollHandler);
+    window._piperScrollHandler = null;
+  }
   _piperScans = [];
   const scans = document.getElementById('scan-scans');
   if (scans) scans.innerHTML = '';
@@ -2870,6 +2877,18 @@ window.piperKameraStarten = () => {
     Math.round(rect.width),
     Math.round(rect.height)
   );
+  // Scroll-Listener: PreviewView mitscrollten
+  const _piperScrollEl = document.querySelector('.content-scroll, main, #main-content');
+  window._piperScrollHandler = () => {
+    if (!_piperAktiv) return;
+    const vf = document.getElementById('pieper-viewfinder');
+    if (!vf) return;
+    const r = vf.getBoundingClientRect();
+    PieperScan.updatePosition(Math.round(r.left), Math.round(r.top), Math.round(r.width), Math.round(r.height));
+  };
+  if (_piperScrollEl) _piperScrollEl.addEventListener('scroll', window._piperScrollHandler, { passive: true });
+  window.addEventListener('scroll', window._piperScrollHandler, { passive: true });
+
   // Callback wenn Kamera bereit
   window.__pieperCameraReady = () => {
     _piperAktiv = true;

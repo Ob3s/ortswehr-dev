@@ -1,1 +1,1 @@
-[{"version": "20260318171555", "datum": "18.03.2026", "punkte": ["Fix: piperCleanup Referenzfehler behoben"]}]
+[{"version": "20260318173655", "datum": "18.03.2026", "punkte": ["Fix: Service Worker ignoriert externe Requests komplett"]}]

@@ -1028,47 +1028,54 @@ registerPage('uebung-form', async (el, {id, typ: vorTyp, alarm: mitAlarm}) => {
     const jetztM  = new Date().getMinutes().toString().padStart(2,'0');
     const jetztZeit = `${jetztH}:${jetztM}`;
     el.innerHTML = `
-      <div class="card" id="pieper-scanner-card">
-        <div style="font-size:0.8rem;font-weight:600;color:var(--muted);margin-bottom:0.5rem">📟 PIEPER SCANNEN (optional)</div>
-        <div style="position:relative;background:#000;border-radius:8px;overflow:hidden;aspect-ratio:16/9">
-          <video id="pieper-video" autoplay playsinline muted style="width:100%;height:100%;object-fit:cover"></video>
-          <div id="pieper-overlay" style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,0.6);color:#fff;font-size:0.85rem;cursor:pointer" onclick="piperKameraStarten()">
-            📷 Kamera aktivieren
-          </div>
-        </div>
-        <div style="display:flex;gap:0.5rem;margin-top:0.5rem">
-          <button class="btn btn-secondary btn-sm" style="flex:1" id="scan-btn" onclick="piperScan()" disabled>📸 Scan</button>
-          <button class="btn btn-secondary btn-sm" style="flex:1" id="scan-stop-btn" onclick="piperStoppen()" disabled>⏹ Stop</button>
-        </div>
-        <div id="scan-scans" style="display:flex;gap:0.4rem;flex-wrap:wrap;margin-top:0.5rem"></div>
-        <button class="btn btn-secondary btn-sm btn-full" id="scan-auslesen-btn" onclick="piperAuslesen()" style="display:none;margin-top:0.4rem">🔍 Text auslesen</button>
-        <div id="scan-loading" style="display:none;text-align:center;padding:0.5rem;font-size:0.8rem;color:var(--muted)">⏳ Lese Text aus…</div>
-        <textarea id="scan-ergebnis" style="display:none;width:100%;margin-top:0.5rem;background:var(--panel2);border:1px solid var(--border);border-radius:8px;padding:0.6rem;font-size:0.8rem;color:var(--text);font-family:monospace;resize:vertical;min-height:80px" readonly placeholder="Erkannter Text erscheint hier…"></textarea>
-      </div>
       <div class="card">
         <div style="font-family:'DM Serif Display',serif;font-size:1.3rem;color:var(--red);margin-bottom:1rem">🚨 Einsatz</div>
-        <div class="form-row">
-          <label>Einsatzstichwort</label>
-          <input id="f-titel" value="${u?.titel||''}" placeholder="Brand, THL, Hilfeleistung…" autofocus>
-        </div>
-        <div class="form-row">
-          <label>Beginn</label>
-          <input id="f-beginn" type="time" value="${u?.zeitBeginn||jetztZeit}">
-        </div>
-        <div class="form-row">
-          <label>Ende (optional, kann nachgetragen werden)</label>
-          <input id="f-ende" type="time" value="${u?.zeitEnde||''}">
-        </div>
-        <div class="form-row ac-wrapper" style="position:relative">
-          <label>Einsatzort / Adresse (optional)</label>
-          <input id="f-ort" value="${u?.ort||''}" placeholder="Hauptstr. 12, Oegeln">
-        </div>
         <input type="hidden" id="f-alarm" value="${mitAlarm ? '1' : '0'}">
-        <div class="btn-row" style="margin-top:0.5rem">
+        <div class="btn-row" style="margin-top:0">
           <button class="btn btn-primary btn-full" onclick="uebungSpeichern('${id||''}','einsatz')">${u ? '💾 Speichern' : mitAlarm ? '🚨 Einsatz melden & Alarm senden' : '💾 Einsatz speichern'}</button>
           ${u ? `<button class="btn btn-danger" onclick="uebungLoeschen('${id}','einsatz')">🗑 Löschen</button>` : ''}
         </div>
         ${u ? `<button class="btn btn-secondary btn-full" style="margin-top:0.5rem" onclick="einsatzNachbenachrichtigen('${id}')">🔔 Benachrichtigung erneut senden</button>` : ''}
+        <div style="margin-top:1rem">
+          <div class="form-row">
+            <label>Einsatzstichwort</label>
+            <input id="f-titel" value="${u?.titel||''}" placeholder="Brand, THL, Hilfeleistung…" autofocus>
+          </div>
+          <div class="form-row">
+            <label>Beginn</label>
+            <input id="f-beginn" type="time" value="${u?.zeitBeginn||jetztZeit}">
+          </div>
+          <div class="form-row">
+            <label>Ende (optional, kann nachgetragen werden)</label>
+            <input id="f-ende" type="time" value="${u?.zeitEnde||''}">
+          </div>
+          <div class="form-row ac-wrapper" style="position:relative">
+            <label>Einsatzort / Adresse (optional)</label>
+            <input id="f-ort" value="${u?.ort||''}" placeholder="Hauptstr. 12, Oegeln">
+          </div>
+        </div>
+      </div>
+      <div class="card" id="pieper-scanner-card">
+        <div style="font-size:0.8rem;font-weight:600;color:var(--muted);margin-bottom:0.5rem">📟 PIEPER SCANNEN (optional)</div>
+        <div style="position:relative;background:#000;border-radius:8px;overflow:hidden;aspect-ratio:4/3;cursor:pointer" onclick="piperVideoTippen()">
+          <video id="pieper-video" autoplay playsinline muted style="width:100%;height:100%;object-fit:cover"></video>
+          <!-- Ausschnitt-Rahmen -->
+          <div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;pointer-events:none">
+            <div style="width:85%;height:55%;border:2px solid rgba(255,220,0,0.8);border-radius:6px;box-shadow:0 0 0 2000px rgba(0,0,0,0.35)"></div>
+          </div>
+          <div id="pieper-overlay" style="position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;background:rgba(0,0,0,0.65);color:#fff;font-size:0.85rem">
+            <div style="font-size:2rem;margin-bottom:0.4rem">📷</div>
+            <div>Antippen zum Aktivieren</div>
+          </div>
+          <div id="pieper-hint" style="display:none;position:absolute;bottom:0.5rem;left:0;right:0;text-align:center;color:rgba(255,255,220,0.9);font-size:0.75rem">Antippen zum Scannen</div>
+        </div>
+        <div style="display:flex;gap:0.5rem;margin-top:0.5rem;align-items:center">
+          <div id="scan-scans" style="display:flex;gap:0.4rem;flex-wrap:wrap;flex:1"></div>
+          <button class="btn btn-secondary btn-sm" id="scan-stop-btn" onclick="piperStoppen()" style="display:none">⏹ Stop</button>
+        </div>
+        <button class="btn btn-secondary btn-sm btn-full" id="scan-auslesen-btn" onclick="piperAuslesen()" style="display:none;margin-top:0.4rem">🔍 Text auslesen</button>
+        <div id="scan-loading" style="display:none;text-align:center;padding:0.5rem;font-size:0.8rem;color:var(--muted)">⏳ Lese Text aus…</div>
+        <textarea id="scan-ergebnis" style="display:none;width:100%;margin-top:0.5rem;background:var(--panel2);border:1px solid var(--border);border-radius:8px;padding:0.6rem;font-size:0.8rem;color:var(--text);font-family:monospace;resize:vertical;min-height:80px" readonly placeholder="Erkannter Text erscheint hier…"></textarea>
       </div>`;
     requestAnimationFrame(() => setTimeout(() => initOrtAutocomplete('f-ort'), 50));
   } else {
@@ -2861,10 +2868,19 @@ window.piperKameraStarten = async () => {
     const video = document.getElementById('pieper-video');
     video.srcObject = _piperStream;
     document.getElementById('pieper-overlay').style.display = 'none';
-    document.getElementById('scan-btn').disabled = false;
-    document.getElementById('scan-stop-btn').disabled = false;
+    document.getElementById('pieper-hint').style.display = 'block';
+    document.getElementById('scan-stop-btn').style.display = 'block';
   } catch(e) {
     fw.toast('Kamera nicht verfügbar: ' + e.message, true);
+  }
+};
+
+// Antippen auf das Video: Kamera starten ODER Scan auslösen
+window.piperVideoTippen = () => {
+  if (!_piperStream) {
+    piperKameraStarten();
+  } else {
+    piperScan();
   }
 };
 
@@ -2872,27 +2888,41 @@ window.piperScan = () => {
   const video = document.getElementById('pieper-video');
   if (!video.srcObject) return;
 
-  // Frame aus Video als JPEG extrahieren
+  const vw = video.videoWidth;
+  const vh = video.videoHeight;
+
+  // Ausschnitt: 85% Breite, 55% Höhe – mittig (entspricht dem gelben Rahmen)
+  const cropW = Math.round(vw * 0.85);
+  const cropH = Math.round(vh * 0.55);
+  const cropX = Math.round((vw - cropW) / 2);
+  const cropY = Math.round((vh - cropH) / 2);
+
+  // Doppelte Auflösung für ML Kit
+  const scale = 2;
   const canvas = document.createElement('canvas');
-  canvas.width  = video.videoWidth;
-  canvas.height = video.videoHeight;
-  canvas.getContext('2d').drawImage(video, 0, 0);
-  const b64 = canvas.toDataURL('image/jpeg', 0.92).split(',')[1];
+  canvas.width  = cropW * scale;
+  canvas.height = cropH * scale;
+  const ctx = canvas.getContext('2d');
+
+  // Kontrast + Helligkeit vor dem Zeichnen
+  ctx.filter = 'contrast(1.8) brightness(1.15) saturate(0)';
+  ctx.drawImage(video, cropX, cropY, cropW, cropH, 0, 0, canvas.width, canvas.height);
+
+  const b64 = canvas.toDataURL('image/jpeg', 1.0).split(',')[1];
   _piperScans.push(b64);
 
-  // Thumbnail anzeigen
+  // Thumbnail
   const nr = _piperScans.length;
   const thumb = document.createElement('div');
-  thumb.style.cssText = 'position:relative;width:60px;height:40px;border-radius:4px;overflow:hidden;border:2px solid var(--green)';
+  thumb.style.cssText = 'position:relative;width:50px;height:34px;border-radius:4px;overflow:hidden;border:2px solid var(--green)';
   thumb.innerHTML = `<img src="data:image/jpeg;base64,${b64}" style="width:100%;height:100%;object-fit:cover">
     <div style="position:absolute;bottom:0;right:2px;font-size:9px;color:#fff;font-weight:600">${nr}</div>`;
   document.getElementById('scan-scans').appendChild(thumb);
 
-  // Auslesen-Button einblenden
   const auslesenBtn = document.getElementById('scan-auslesen-btn');
   auslesenBtn.style.display = 'block';
   auslesenBtn.textContent = `🔍 Text auslesen (${nr} Bild${nr !== 1 ? 'er' : ''})`;
-  fw.toast(`Scan ${nr} gespeichert`);
+  fw.toast(`Scan ${nr} ✓`);
 };
 
 window.piperStoppen = () => {
@@ -2901,11 +2931,11 @@ window.piperStoppen = () => {
     _piperStream = null;
   }
   const overlay = document.getElementById('pieper-overlay');
-  if (overlay) { overlay.style.display = 'flex'; overlay.textContent = '📷 Kamera aktivieren'; }
-  const scanBtn = document.getElementById('scan-btn');
-  if (scanBtn) scanBtn.disabled = true;
+  if (overlay) overlay.style.display = 'flex';
+  const hint = document.getElementById('pieper-hint');
+  if (hint) hint.style.display = 'none';
   const stopBtn = document.getElementById('scan-stop-btn');
-  if (stopBtn) stopBtn.disabled = true;
+  if (stopBtn) stopBtn.style.display = 'none';
 };
 
 window.piperAuslesen = () => {

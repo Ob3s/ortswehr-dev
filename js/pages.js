@@ -2853,7 +2853,12 @@ if (_origNavigate) {
 window.piperKameraStarten = async () => {
   try {
     _piperStream = await navigator.mediaDevices.getUserMedia({
-      video: { facingMode: 'environment', width: { ideal: 1920 }, height: { ideal: 1080 } }
+      video: {
+        facingMode: 'environment',
+        width: { ideal: 1920 },
+        height: { ideal: 1080 },
+        advanced: [{ focusMode: 'continuous' }]
+      }
     });
     const video = document.getElementById('pieper-video');
     video.srcObject = _piperStream;
@@ -2865,13 +2870,24 @@ window.piperKameraStarten = async () => {
   }
 };
 
-// Antippen auf das Video: Kamera starten ODER Scan auslösen
-window.piperVideoTippen = () => {
+// Antippen: Kamera starten ODER Fokus neu triggern + Scan
+window.piperVideoTippen = async () => {
   if (!_piperStream) {
     piperKameraStarten();
-  } else {
-    piperScan();
+    return;
   }
+  // Fokus-Trigger: kurz auf Nahfokus, dann zurück auf continuous
+  try {
+    const track = _piperStream.getVideoTracks()[0];
+    const caps = track.getCapabilities?.() || {};
+    if (caps.focusMode?.includes?.('manual') && caps.focusDistance) {
+      await track.applyConstraints({ advanced: [{ focusMode: 'manual', focusDistance: caps.focusDistance.min * 3 }] });
+      await new Promise(r => setTimeout(r, 200));
+      await track.applyConstraints({ advanced: [{ focusMode: 'continuous' }] });
+      await new Promise(r => setTimeout(r, 600));
+    }
+  } catch(e) { /* Fokus-API nicht unterstützt – direkt scannen */ }
+  piperScan();
 };
 
 window.piperScan = () => {

@@ -2908,48 +2908,40 @@ window.piperStoppen = () => {
   if (stopBtn) stopBtn.disabled = true;
 };
 
-window.piperAuslesen = async () => {
+window.piperAuslesen = () => {
   if (!_piperScans.length) return;
 
   const loading  = document.getElementById('scan-loading');
   const ergebnis = document.getElementById('scan-ergebnis');
   const btn      = document.getElementById('scan-auslesen-btn');
 
+  // Nur in der nativen App verfügbar
+  if (typeof PieperScan === 'undefined') {
+    fw.toast('Nur in der nativen App verfügbar', true);
+    return;
+  }
+
   btn.disabled = true;
   loading.style.display = 'block';
   ergebnis.style.display = 'none';
 
-  try {
-    // Alle Bilder als content-Blöcke aufbauen
-    const imageBlocks = _piperScans.map((b64, i) => ([
-      {
-        type: 'text',
-        text: _piperScans.length > 1 ? `Bild ${i+1} von ${_piperScans.length}:` : 'Pieper-Anzeige:'
-      },
-      {
-        type: 'image',
-        source: { type: 'base64', media_type: 'image/jpeg', data: b64 }
-      }
-    ])).flat();
+  // Ergebnisse sammeln – Java ruft __pieperScanResult für jeden Scan auf
+  const ergebnisTexte = new Array(_piperScans.length);
+  let fertig = 0;
 
-    const res = await fetch('https://europe-west3-ffw-oegeln-791ca.cloudfunctions.net/pieperscan', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-uid': fw.user.uid,
-      },
-      body: JSON.stringify({ images: _piperScans })
-    });
+  window.__pieperScanResult = (callbackId, text, error) => {
+    const idx = parseInt(callbackId);
+    ergebnisTexte[idx] = error ? '[Fehler: ' + error + ']' : (text || '');
+    fertig++;
+    if (fertig === _piperScans.length) {
+      loading.style.display = 'none';
+      btn.disabled = false;
+      const gesamt = ergebnisTexte.join('\n---\n').trim();
+      ergebnis.value = gesamt || 'Kein Text erkannt.';
+      ergebnis.style.display = 'block';
+    }
+  };
 
-    const data = await res.json();
-    const text = data.text || 'Kein Text erkannt.';
-
-    ergebnis.value = text;
-    ergebnis.style.display = 'block';
-  } catch(e) {
-    fw.toast('Fehler beim Auslesen: ' + e.message, true);
-  } finally {
-    loading.style.display = 'none';
-    btn.disabled = false;
-  }
+  // Jeden Scan an ML Kit schicken
+  _piperScans.forEach((b64, i) => PieperScan.scanBase64(b64, String(i)));
 };

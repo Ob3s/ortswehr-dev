@@ -815,7 +815,7 @@ registerPage('uebung-detail', async (el, {id, typ}) => {
   const u = {id,...snap.data()};
   const isEinsatz = u.typ === 'einsatz';
   fw.setTitle(isEinsatz ? 'Einsatz' : 'Dienst');
-  fw.showBack(() => navigate(u.typ === 'einsatz' ? 'einsaetze' : 'dienste'));
+  fw.showBack(() => navigateBack());
   if (fw.isWehrfuehrer()) fw.showHeaderAction('✏️ Edit', () => navigate('uebung-form',{id, typ: u.typ}));
 
   const aSnap = await fw.getDocs('anwesenheiten',
@@ -971,7 +971,7 @@ window.teilnehmerEntfernen = async (aId, uebungId, typ) => {
 // ── Kamerad direkt eintragen ──────────────────────────────
 registerPage('uebung-eintragen', async (el, {id, titel, dauer, typ, datumStr}) => {
   fw.setTitle('Eintragen');
-  fw.showBack(() => navigate('uebung-detail',{id, typ}));
+  fw.showBack(() => navigateBack());
   const [usersSnap, bereitsSnap] = await Promise.all([
     fw.getDocs('users'),
     fw.getDocs('anwesenheiten', fw.where('uebungId','==',id)),
@@ -1018,7 +1018,7 @@ registerPage('uebung-form', async (el, {id, typ: vorTyp, alarm: mitAlarm}) => {
   const selTyp = u?.typ || vorTyp || 'dienst';
   const isEinsatz = selTyp === 'einsatz';
   fw.setTitle(u ? 'Bearbeiten' : (isEinsatz ? 'Einsatz melden' : 'Neuer Dienst'));
-  fw.showBack(() => navigate(selTyp === 'einsatz' ? 'einsaetze' : 'dienste'));
+  fw.showBack(() => navigateBack());
 
   const datumVal = u?.datum?.toDate ? u.datum.toDate().toISOString().slice(0,10)
     : new Date().toISOString().slice(0,10);
@@ -1391,7 +1391,7 @@ window.abmelden = async () => {
 // ── Einstellungen ─────────────────────────────────────────
 registerPage('einstellungen', async (el) => {
   fw.setTitle('Einstellungen');
-  fw.showBack(() => navigate('profil'));
+  fw.showBack(() => navigateBack());
 
   const isNative = typeof window.AlarmSettings !== 'undefined';
   const aktivProfil = isNative ? window.AlarmSettings.getProfil() : 'laut';
@@ -1471,7 +1471,7 @@ registerPage('einstellungen', async (el) => {
 // ── Statistik ─────────────────────────────────────────────
 registerPage('statistik', async (el) => {
   fw.setTitle('Statistik');
-  fw.showBack(() => navigate('kameraden'));
+  fw.showBack(() => navigateBack());
   el.innerHTML = '<div class="empty">⏳ Lade...</div>';
 
   const jetzt    = new Date();
@@ -1709,7 +1709,7 @@ function berechneEndDatum(startDatumStr, tage, lehrgang) {
 
 registerPage('lehrgaenge', async (el) => {
   fw.setTitle('Lehrgänge');
-  fw.showBack(() => navigate('kameraden'));
+  fw.showBack(() => navigateBack());
 
   const jahrAkt = new Date().getFullYear();
   let aktivTab = 'uebersicht';
@@ -2006,7 +2006,7 @@ registerPage('lehrgaenge', async (el) => {
 // ── News erstellen ────────────────────────────────────────
 registerPage('news-form', async (el) => {
   fw.setTitle('Beitrag erstellen');
-  fw.showBack(() => navigate('dashboard'));
+  fw.showBack(() => navigateBack());
   let optionen = ['', ''];
   let pdfFile = null;
 
@@ -2346,7 +2346,7 @@ registerPage('kamerad-detail', async (el, {id}) => {
   if (!snap.exists()) { el.innerHTML='<div class="empty">Nicht gefunden</div>'; return; }
   const u = {id,...snap.data()};
   fw.setTitle(u.vorname+' '+u.nachname);
-  fw.showBack(() => navigate('kameraden'));
+  fw.showBack(() => navigateBack());
   fw.showHeaderAction('✏️ Edit', () => navigate('kamerad-form',{id}));
 
   const [aSnap, qSnap, ortSnap, planSnap] = await Promise.all([
@@ -2586,7 +2586,7 @@ registerPage('ortswehr-form', async (el, {id}) => {
   let w = null;
   if (id) { const s=await fw.getDoc('ortswehren/'+id); if(s.exists()) w={id,...s.data()}; }
   fw.setTitle(w ? 'Ortswehr bearbeiten' : 'Neue Ortswehr');
-  fw.showBack(() => navigate('ortswehren'));
+  fw.showBack(() => navigateBack());
   el.innerHTML = `
     <div class="card">
       <div class="form-row"><label>Name der Wehr</label><input id="ow-name" value="${w?.name||''}" placeholder="FFW Musterort"></div>
@@ -2704,7 +2704,7 @@ window.pruefDatumAktualisieren = async (id) => {
 registerPage('fahrzeug-form', async (el, {id}) => {
   if (!fw.isWehrfuehrer()) { el.innerHTML = '<div class="empty">Keine Berechtigung</div>'; return; }
   fw.setTitle(id ? 'Fahrzeug bearbeiten' : 'Neues Fahrzeug');
-  fw.showBack(() => navigate('dienste'));
+  fw.showBack(() => navigateBack());
 
   let fahrzeug = null;
   if (id) {
@@ -2764,7 +2764,7 @@ window.fahrzeugLoeschen = async (id) => {
 registerPage('pruefaufgabe-form', async (el, {id, fahrzeugId: vorFahrzeugId}) => {
   if (!fw.isWehrfuehrer()) { el.innerHTML = '<div class="empty">Keine Berechtigung</div>'; return; }
   fw.setTitle(id ? 'Aufgabe bearbeiten' : 'Neue Aufgabe');
-  fw.showBack(() => navigate('dienste'));
+  fw.showBack(() => navigateBack());
 
   let aufgabe = null;
   if (id) {
@@ -2870,23 +2870,18 @@ window.piperKameraStarten = async () => {
   }
 };
 
-// Antippen: Kamera starten ODER Fokus neu triggern + Scan
+// Antippen: Kamera starten ODER kurz warten für Fokus dann Scan
 window.piperVideoTippen = async () => {
   if (!_piperStream) {
     piperKameraStarten();
     return;
   }
-  // Fokus-Trigger: kurz auf Nahfokus, dann zurück auf continuous
-  try {
-    const track = _piperStream.getVideoTracks()[0];
-    const caps = track.getCapabilities?.() || {};
-    if (caps.focusMode?.includes?.('manual') && caps.focusDistance) {
-      await track.applyConstraints({ advanced: [{ focusMode: 'manual', focusDistance: caps.focusDistance.min * 3 }] });
-      await new Promise(r => setTimeout(r, 200));
-      await track.applyConstraints({ advanced: [{ focusMode: 'continuous' }] });
-      await new Promise(r => setTimeout(r, 600));
-    }
-  } catch(e) { /* Fokus-API nicht unterstützt – direkt scannen */ }
+  // Fokus-Indikator anzeigen
+  const hint = document.getElementById('pieper-hint');
+  if (hint) hint.textContent = '🔍 Fokussiert…';
+  // 800ms warten damit die Kamera fokussieren kann
+  await new Promise(r => setTimeout(r, 800));
+  if (hint) hint.textContent = 'Antippen zum Scannen';
   piperScan();
 };
 

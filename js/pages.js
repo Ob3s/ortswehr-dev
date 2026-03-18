@@ -2881,10 +2881,13 @@ window.piperKameraStarten = () => {
   const _piperScrollEl = document.querySelector('.content-scroll, main, #main-content');
   window._piperScrollHandler = () => {
     if (!_piperAktiv) return;
+    if (typeof PieperScan === 'undefined' || !PieperScan.updatePosition) return;
     const vf = document.getElementById('pieper-viewfinder');
     if (!vf) return;
-    const r = vf.getBoundingClientRect();
-    PieperScan.updatePosition(Math.round(r.left), Math.round(r.top), Math.round(r.width), Math.round(r.height));
+    try {
+      const r = vf.getBoundingClientRect();
+      PieperScan.updatePosition(Math.round(r.left), Math.round(r.top), Math.round(r.width), Math.round(r.height));
+    } catch(e) {}
   };
   if (_piperScrollEl) _piperScrollEl.addEventListener('scroll', window._piperScrollHandler, { passive: true });
   window.addEventListener('scroll', window._piperScrollHandler, { passive: true });

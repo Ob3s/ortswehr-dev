@@ -1899,8 +1899,8 @@ registerPage('lehrgaenge', async (el) => {
           const u = usersMap.get(p.userId);
           return `<div class="list-item">
             <div class="list-item-body">
-              <div class="list-item-title">${u ? kurzName(u.vorname, u.nachname) : '–'} · ${p.lehrgang}</div>
-              <div class="list-item-sub">${p.datum ? datum(p.datum)+' · ' : ''}${p.tage ? p.tage+' Tage' : ''}${p.bemerkung ? (p.tage?' · ':'')+p.bemerkung : ''}${!p.datum&&!p.tage&&!p.bemerkung?'Geplant':''}</div>
+              <div class="list-item-title">${u ? kurzName(u.vorname, u.nachname) : '–'}</div>
+              <div class="list-item-sub">${p.lehrgang}${p.datum ? ' · '+(([y,m,d]) => `${d}.${m}.${y}`)(p.datum.split('-')) : ''}${p.tage ? ' · '+p.tage+' Tage' : ''}${p.bemerkung ? ' · '+p.bemerkung : ''}</div>
             </div>
             <button class="btn btn-sm btn-danger" onclick="planungLoeschen('${p.id}')">🗑</button>
           </div>`;

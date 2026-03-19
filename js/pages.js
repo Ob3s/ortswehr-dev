@@ -1441,7 +1441,7 @@ window.alarmSelbsttest = async () => {
       erstelltAm: new Date(),
       erstelltVon: fw.user.uid,
     });
-    fw.toast('Testaalarm gesendet – du solltest gleich alarmiert werden 🔔');
+    fw.toast('Testalarm gesendet – du solltest gleich alarmiert werden 🔔');
   } catch(e) {
     fw.toast('Fehler: ' + e.message, true);
   }

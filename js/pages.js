@@ -256,7 +256,7 @@ function renderNewsBeitrag(b, usersMap) {
   const gesamt = b.abstimmung?.optionen?.reduce((s,o) => s+(o.stimmen?.length||0), 0) || 0;
   const abstimmungHtml = b.abstimmung ? `
     <div style="margin-top:0.8rem;border-top:1px solid var(--border);padding-top:0.6rem">
-      <div style="font-weight:600;font-size:0.88rem;margin-bottom:0.6rem">🗳️ ${b.abstimmung.frage}</div>
+      <div style="font-weight:600;font-size:0.88rem;margin-bottom:0.6rem">${b.abstimmung.frage}</div>
       ${b.abstimmung.optionen.map((o,i) => {
         const pct = gesamt ? Math.round(((o.stimmen||[]).length)/gesamt*100) : 0;
         const meineStimme = (o.stimmen||[]).includes(fw.user.uid);
@@ -296,8 +296,8 @@ function renderNewsBeitrag(b, usersMap) {
     ${abstimmungHtml}
     <div style="font-size:0.72rem;color:var(--muted);margin-top:0.5rem">${datum(b.erstelltAm)}</div>
     ${fw.isWehrfuehrer() ? `<div style="margin-top:0.3rem;display:flex;gap:0.8rem">
-      <button onclick="newsLoeschen('${b.id}')" style="background:none;border:none;color:#9ca3af;font-size:0.75rem;cursor:pointer;padding:0">🗑 Löschen</button>
-      <button onclick="newsArchivieren('${b.id}',${!b.archiviert})" style="background:none;border:none;color:#9ca3af;font-size:0.75rem;cursor:pointer;padding:0">${b.archiviert ? '📤 Wiederherstellen' : '📦 Archivieren'}</button>
+      <button onclick="newsLoeschen('${b.id}')" style="background:none;border:none;color:#9ca3af;font-size:0.75rem;cursor:pointer;padding:0">Löschen</button>
+      <button onclick="newsArchivieren('${b.id}',${!b.archiviert})" style="background:none;border:none;color:#9ca3af;font-size:0.75rem;cursor:pointer;padding:0">${b.archiviert ? 'Wiederherstellen' : 'Archivieren'}</button>
     </div>` : ''}
     <div style="margin-top:0.7rem;border-top:1px solid var(--border);padding-top:0.6rem">
       <div id="kommentare-${b.id}" style="margin-bottom:0.4rem">
@@ -360,9 +360,18 @@ async function ladeNewsFeed() {
 
   // Live-Listener auf news
   _newsFeedListener = fw.onQuerySnapshot('news', snap => {
+    const jetzt = Date.now();
+    const dreissigTage = 30 * 24 * 60 * 60 * 1000;
     const alle = snap.docs
       .map(d => ({id:d.id,...d.data()}))
       .sort((a,b) => (b.erstelltAm?.toMillis?.() || 0) - (a.erstelltAm?.toMillis?.() || 0));
+
+    // Automatisch archivieren wenn älter als 30 Tage
+    alle.forEach(b => {
+      if (!b.archiviert && b.erstelltAm?.toMillis && (jetzt - b.erstelltAm.toMillis()) > dreissigTage) {
+        fw.updateDoc('news/'+b.id, { archiviert: true });
+      }
+    });
     const aktiv     = alle.filter(b => !b.archiviert);
     const archiviert = alle.filter(b => b.archiviert);
 

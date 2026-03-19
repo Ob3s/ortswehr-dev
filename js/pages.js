@@ -897,8 +897,7 @@ registerPage('uebung-detail', async (el, {id, typ}) => {
 
   el.innerHTML = `
     <div class="card">
-      <span class="badge badge-blue">${isEinsatz?'⚡ Einsatz':'📅 Dienst'}</span>
-      <div style="margin-top:0.6rem;font-weight:600;font-size:1.1rem">${u.titel}</div>
+      <div style="font-weight:600;font-size:1.1rem">${u.titel}</div>
       <div style="margin-top:0.3rem;color:var(--muted);font-size:0.85rem">${datum(u.datum)}${zeitZeile(u) ? ' · '+zeitZeile(u) : ''}</div>
       ${u.beschreibung ? `<p class="muted" style="margin-top:0.4rem;font-size:0.85rem">${u.beschreibung}</p>` : ''}
       ${u.ort ? `<div style="margin-top:0.5rem;display:flex;align-items:center;gap:0.5rem;flex-wrap:wrap">

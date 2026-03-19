@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
   <meta name="theme-color" content="#cc2200">
-  <meta name="app-version" content="20260319135635">
+  <meta name="app-version" content="20260319140003">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <meta name="apple-mobile-web-app-title" content="Ortswehr">
@@ -286,14 +286,29 @@
       const snap = await getDoc(doc(db, 'users', user.uid));
       if (snap.exists()) {
         fw.profil = { id: user.uid, ...snap.data() };
+        // Standardwerte für fehlende Einstellungen setzen
+        const defaults = {};
+        if (fw.profil.notif_einsatz         === undefined) defaults.notif_einsatz         = true;
+        if (fw.profil.notif_uebung          === undefined) defaults.notif_uebung          = true;
+        if (fw.profil.notif_bestaetigung    === undefined) defaults.notif_bestaetigung    = true;
+        if (fw.profil.notif_dienst_reminder === undefined) defaults.notif_dienst_reminder = true;
+        if (fw.profil.notif_status          === undefined) defaults.notif_status          = true;
+        if (fw.profil.theme                 === undefined) defaults.theme                 = 'klassisch';
+        if (Object.keys(defaults).length > 0) {
+          Object.assign(fw.profil, defaults);
+          await updateDoc(doc(db, 'users', user.uid), defaults);
+        }
         // Theme sofort anwenden
-        if (fw.profil.theme === 'klassisch') document.body.setAttribute('data-theme', 'klassisch');
+        const t = fw.profil.theme;
+        if (t === 'klassisch') document.body.setAttribute('data-theme', 'klassisch');
         else document.body.removeAttribute('data-theme');
       } else {
         fw.profil = { id: user.uid, email: user.email, rolle: 'kamerad',
           vorname: '', nachname: '', dienstgrad: '',
-          notif_einsatz: true, notif_uebung: true, notif_bestaetigung: true };
+          notif_einsatz: true, notif_uebung: true, notif_bestaetigung: true,
+          notif_dienst_reminder: true, notif_status: true, theme: 'klassisch' };
         await setDoc(doc(db, 'users', user.uid), fw.profil);
+        document.body.setAttribute('data-theme', 'klassisch');
       }
       if (fw.isWehrfuehrer()) {
         document.getElementById('nav-kameraden').classList.remove('hidden');

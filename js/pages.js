@@ -1071,6 +1071,7 @@ registerPage('uebung-form', async (el, {id, typ: vorTyp, alarm: mitAlarm}) => {
         </div>
         ${u ? `<button class="btn btn-secondary btn-full" style="margin-bottom:0.75rem" onclick="einsatzNachbenachrichtigen('${id}')">🔔 Benachrichtigung erneut senden</button>` : ''}
         <input id="f-titel" value="${u?.titel||''}" placeholder="Einsatzstichwort" style="margin-bottom:0.5rem" autofocus>
+        ${u ? `<div class="form-row" style="margin-bottom:0.5rem"><label>Datum</label><input id="f-datum" type="date" value="${datumVal}"></div>` : ''}
         <div class="ac-wrapper" style="position:relative;margin-bottom:0.5rem">
           <input id="f-ort" value="${u?.ort||''}" placeholder="Einsatzort / Adresse (optional)">
         </div>
@@ -1124,9 +1125,8 @@ window.uebungSpeichern = async (id, forcTyp) => {
   const typ     = forcTyp === 'einsatz' ? 'einsatz' : 'dienst';
   const isEinsatz = typ === 'einsatz';
 
-  const datumStr = isEinsatz
-    ? new Date().toISOString().slice(0,10)
-    : (document.getElementById('f-datum')?.value || new Date().toISOString().slice(0,10));
+  const datumStr = document.getElementById('f-datum')?.value
+    || (isEinsatz ? new Date().toISOString().slice(0,10) : new Date().toISOString().slice(0,10));
   const beschr     = document.getElementById('f-beschr')?.value?.trim() || '';
   const zeitBeginn = document.getElementById('f-beginn')?.value || null;
   const zeitEnde   = document.getElementById('f-ende')?.value || null;

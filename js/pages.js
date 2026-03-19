@@ -1300,16 +1300,18 @@ function checkDeepLink() {
 registerPage('profil', async (el) => {
   fw.setTitle('Mein Profil');
   // Immer frisch laden damit notif-Felder aktuell sind
-  const [meSnap, qSnap, aSnap, pDiensteSnap, pEinsaetzeSnap] = await Promise.all([
+  const [meSnap, qSnap, aSnap, pDiensteSnap, pEinsaetzeSnap, planSnap] = await Promise.all([
     fw.getDoc('users/'+fw.user.uid),
     fw.getDocs('users/'+fw.user.uid+'/qualifikationen'),
     fw.getDocs('anwesenheiten', fw.where('userId','==',fw.user.uid)),
     fw.getDocs('dienste'),
     fw.getDocs('einsaetze'),
+    fw.getDocs('lehrgangsplanung', fw.where('userId','==',fw.user.uid)),
   ]);
   const me = meSnap.data() || fw.profil;
   Object.assign(fw.profil, me);
   const qualis = qSnap.docs.map(d => ({id:d.id,...d.data()}));
+  const planung = planSnap.docs.map(d => ({id:d.id,...d.data()}));
   const pDienstMap  = new Map(pDiensteSnap.docs.map(d => [d.id, d.data()]));
   const pEinsatzMap = new Map(pEinsaetzeSnap.docs.map(d => [d.id, d.data()]));
   const stats  = getStats(aSnap.docs.map(d => d.data()), pDienstMap, pEinsatzMap);
@@ -1339,6 +1341,15 @@ registerPage('profil', async (el) => {
       <hr>
       <div class="card-title" style="margin-bottom:0.5rem">Lehrgänge</div>
       ${renderQualisProfil(qualis, me)}
+      ${planung.length ? `
+        <div style="margin-top:0.6rem;padding-top:0.6rem;border-top:1px solid var(--border)">
+          <div style="font-size:0.78rem;color:var(--muted);font-weight:600;margin-bottom:0.4rem">Geplant</div>
+          ${planung.sort((a,b) => (a.datum||'').localeCompare(b.datum||'')).map(p => `
+            <div style="display:flex;align-items:center;gap:0.5rem;padding:0.35rem 0;border-bottom:1px solid var(--border)">
+              <div style="flex:1;font-size:0.85rem">${p.lehrgang}</div>
+              <div style="font-size:0.78rem;color:var(--muted)">${p.datum ? datum(p.datum) : p.jahr}</div>
+            </div>`).join('')}
+        </div>` : ''}
     </div>
 
     <div class="section-header">Passwort ändern</div>

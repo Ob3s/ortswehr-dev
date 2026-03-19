@@ -439,10 +439,13 @@ async function pruefeStatus() {
   const snap     = await fw.getDoc('users/'+fw.user.uid);
   const tokenOk  = !!(snap.data()?.fcmToken);
 
-  // FCM-Token validieren und ggf. erneuern
+  // Native App (Capacitor): Token kommt von Java, kein Web-Messaging nötig
+  const istNativeApp = typeof AppInfo !== 'undefined';
   let tokenFrisch = tokenOk;
-  let tokenInfo = tokenOk ? 'Token vorhanden' : 'Kein Token gespeichert';
-  if (online && notifOk && tokenOk && fw.messaging) {
+  let tokenInfo = tokenOk ? 'Token vorhanden ✓' : 'Kein Token gespeichert';
+
+  if (!istNativeApp && online && notifOk && tokenOk && fw.messaging) {
+    // PWA: Web-Push Token prüfen
     try {
       const swReg = await navigator.serviceWorker.getRegistration('/firebase-messaging-sw.js');
       if (swReg) {
@@ -470,6 +473,18 @@ async function pruefeStatus() {
     { label: 'Benachrichtigungen', ok: notifOk, info: notifOk ? 'Erlaubt' : 'Berechtigung verweigert' },
     { label: 'Push-Token', ok: tokenFrisch, info: tokenInfo },
   ];
+
+  // Native App: zusätzliche Checks
+  if (istNativeApp) {
+    const akkuOk = typeof BatteryOptimization !== 'undefined'
+      ? BatteryOptimization.isIgnoring()
+      : true; // wenn Bridge nicht vorhanden, nicht als Fehler werten
+    _statusDetails.push({
+      label: 'Akkuoptimierung',
+      ok: akkuOk,
+      info: akkuOk ? 'Deaktiviert ✓' : 'Aktiv – Alarme könnten verzögert ankommen'
+    });
+  }
 
   lampe.style.background = allesOk ? '#22c55e' : '#ef4444';
   lampe.style.boxShadow  = `0 0 6px ${allesOk ? '#22c55e' : '#ef4444'}`;

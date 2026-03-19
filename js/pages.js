@@ -295,7 +295,10 @@ function renderNewsBeitrag(b, usersMap) {
     ${b.pdf ? `<a href="${b.pdf.url}" target="_blank" style="display:inline-flex;align-items:center;gap:0.4rem;margin-top:0.5rem;padding:0.4rem 0.8rem;background:var(--panel2);border:1px solid var(--border);border-radius:8px;font-size:0.82rem;color:var(--blue);text-decoration:none;max-width:100%;overflow:hidden">📄 <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:200px">${b.pdf.name}</span></a>` : ''}
     ${abstimmungHtml}
     <div style="font-size:0.72rem;color:var(--muted);margin-top:0.5rem">${datum(b.erstelltAm)}</div>
-    ${fw.isWehrfuehrer() ? `<button onclick="newsLoeschen('${b.id}')" style="background:none;border:none;color:#9ca3af;font-size:0.75rem;cursor:pointer;padding:0;margin-top:0.3rem">🗑 Löschen</button>` : ''}
+    ${fw.isWehrfuehrer() ? `<div style="margin-top:0.3rem;display:flex;gap:0.8rem">
+      <button onclick="newsLoeschen('${b.id}')" style="background:none;border:none;color:#9ca3af;font-size:0.75rem;cursor:pointer;padding:0">🗑 Löschen</button>
+      <button onclick="newsArchivieren('${b.id}',${!b.archiviert})" style="background:none;border:none;color:#9ca3af;font-size:0.75rem;cursor:pointer;padding:0">${b.archiviert ? '📤 Wiederherstellen' : '📦 Archivieren'}</button>
+    </div>` : ''}
     <div style="margin-top:0.7rem;border-top:1px solid var(--border);padding-top:0.6rem">
       <div id="kommentare-${b.id}" style="margin-bottom:0.4rem">
         ${(b.kommentare||[]).map(k => {
@@ -357,14 +360,31 @@ async function ladeNewsFeed() {
 
   // Live-Listener auf news
   _newsFeedListener = fw.onQuerySnapshot('news', snap => {
-    const beitraege = snap.docs
+    const alle = snap.docs
       .map(d => ({id:d.id,...d.data()}))
       .sort((a,b) => (b.erstelltAm?.toMillis?.() || 0) - (a.erstelltAm?.toMillis?.() || 0));
-    if (!beitraege.length) {
+    const aktiv     = alle.filter(b => !b.archiviert);
+    const archiviert = alle.filter(b => b.archiviert);
+
+    if (!aktiv.length && !archiviert.length) {
       el.innerHTML = header + '<div class="card" style="color:var(--muted);font-size:0.88rem">Noch keine Neuigkeiten.</div>';
       return;
     }
-    el.innerHTML = header + beitraege.map(b => renderNewsBeitrag(b, usersMap)).join('');
+
+    let html = header + aktiv.map(b => renderNewsBeitrag(b, usersMap)).join('');
+
+    if (archiviert.length && fw.isWehrfuehrer()) {
+      html += `<details style="margin-top:0.5rem">
+        <summary style="font-size:0.85rem;color:var(--muted);cursor:pointer;padding:0.4rem 0">
+          📦 Archiv (${archiviert.length})
+        </summary>
+        <div style="margin-top:0.4rem">
+          ${archiviert.map(b => renderNewsBeitrag(b, usersMap)).join('')}
+        </div>
+      </details>`;
+    }
+
+    el.innerHTML = html;
   });
 }
 
@@ -391,6 +411,11 @@ window.newsAbstimmen = async (newsId, optionIndex) => {
     'abstimmung.aenderungen': aenderungen,
   });
   ladeNewsFeed();
+};
+
+window.newsArchivieren = async (id, archiviert) => {
+  await fw.updateDoc('news/'+id, { archiviert });
+  fw.toast(archiviert ? 'Archiviert 📦' : 'Wiederhergestellt ✅');
 };
 
 window.newsLoeschen = async (id) => {

@@ -1347,7 +1347,7 @@ registerPage('profil', async (el) => {
           ${planung.sort((a,b) => (a.datum||'').localeCompare(b.datum||'')).map(p => `
             <div style="display:flex;align-items:center;gap:0.5rem;padding:0.35rem 0;border-bottom:1px solid var(--border)">
               <div style="flex:1;font-size:0.85rem">${p.lehrgang}</div>
-              <div style="font-size:0.78rem;color:var(--muted)">${p.datum ? new Date(p.datum).toLocaleDateString('de-DE', {day:'2-digit',month:'2-digit',year:'numeric'}) : String(p.jahr||'')}</div>
+              <div style="font-size:0.78rem;color:var(--muted)">${p.datum ? (([y,m,d]) => `${d}.${m}.${y}`)(p.datum.split('-')) : String(p.jahr||'')}</div>
             </div>`).join('')}
         </div>` : ''}
     </div>

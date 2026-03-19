@@ -434,76 +434,95 @@ window.zeigeStatusDetail = () => {
 async function pruefeStatus() {
   const lampe = document.getElementById('status-lampe');
   if (!lampe) return;
-  const online   = navigator.onLine;
-  const notifOk  = Notification.permission === 'granted';
-  const snap     = await fw.getDoc('users/'+fw.user.uid);
-  const tokenOk  = !!(snap.data()?.fcmToken);
+  if (!fw.user) return; // noch nicht eingeloggt
 
-  // Native App (Capacitor): Token kommt von Java, kein Web-Messaging nötig
-  const istNativeApp = typeof AppInfo !== 'undefined';
-  let tokenFrisch = tokenOk;
-  let tokenInfo = tokenOk ? 'Token vorhanden ✓' : 'Kein Token gespeichert';
+  try {
+    const online = navigator.onLine;
+    const istNativeApp = typeof AppInfo !== 'undefined';
 
-  if (!istNativeApp && online && notifOk && tokenOk && fw.messaging) {
-    // PWA: Web-Push Token prüfen
-    try {
-      const swReg = await navigator.serviceWorker.getRegistration('/firebase-messaging-sw.js');
-      if (swReg) {
-        const { getToken } = await import('https://www.gstatic.com/firebasejs/10.8.0/firebase-messaging.js');
-        const aktuellerToken = await getToken(fw.messaging, { vapidKey: fw._vapid, serviceWorkerRegistration: swReg });
-        if (aktuellerToken && aktuellerToken !== snap.data()?.fcmToken) {
-          await fw.setDoc('users/'+fw.user.uid, { fcmToken: aktuellerToken });
-          if (fw.profil) fw.profil.fcmToken = aktuellerToken;
-          tokenInfo = 'Token erneuert ✓';
-          console.log('Status-Check: FCM Token erneuert');
-        } else if (aktuellerToken) {
-          tokenInfo = 'Token gültig ✓';
+    // Benachrichtigungen: In nativer App immer OK wenn Token vorhanden
+    // (WebView meldet permission oft falsch)
+    const notifPerm = typeof Notification !== 'undefined' ? Notification.permission : 'denied';
+    const notifOk   = istNativeApp ? true : notifPerm === 'granted';
+
+    // Token aus Firestore
+    const snap    = await fw.getDoc('users/' + fw.user.uid);
+    const tokenOk = !!(snap.data()?.fcmToken);
+
+    let tokenFrisch = tokenOk;
+    let tokenInfo   = tokenOk ? 'Token vorhanden ✓' : 'Kein Token gespeichert';
+
+    if (!istNativeApp && online && notifOk && tokenOk && fw.messaging) {
+      // PWA: Web-Push Token prüfen
+      try {
+        const swReg = await navigator.serviceWorker.getRegistration('/firebase-messaging-sw.js');
+        if (swReg) {
+          const { getToken } = await import('https://www.gstatic.com/firebasejs/10.8.0/firebase-messaging.js');
+          const aktuellerToken = await getToken(fw.messaging, { vapidKey: fw._vapid, serviceWorkerRegistration: swReg });
+          if (aktuellerToken && aktuellerToken !== snap.data()?.fcmToken) {
+            await fw.setDoc('users/' + fw.user.uid, { fcmToken: aktuellerToken });
+            if (fw.profil) fw.profil.fcmToken = aktuellerToken;
+            tokenInfo = 'Token erneuert ✓';
+          } else if (aktuellerToken) {
+            tokenInfo = 'Token gültig ✓';
+          }
+          tokenFrisch = !!aktuellerToken;
         }
-        tokenFrisch = !!aktuellerToken;
-      }
-    } catch(e) { tokenInfo = 'Token-Prüfung fehlgeschlagen'; }
-  }
+      } catch(e) { tokenInfo = 'Token-Prüfung fehlgeschlagen: ' + e.message; }
+    }
 
-  const allesOk = online && notifOk && tokenFrisch;
-  const grund   = !online ? 'Kein Internet' : !notifOk ? 'Benachrichtigungen nicht erlaubt' : 'Kein Push-Token';
+    const allesOk = online && notifOk && tokenFrisch;
+    const grund   = !online ? 'Kein Internet' : !tokenFrisch ? 'Kein Push-Token' : 'Problem erkannt';
 
-  // Detail-Status für Modal
-  _statusDetails = [
-    { label: 'Internetverbindung', ok: online, info: online ? 'Verbunden' : 'Nicht verbunden' },
-    { label: 'Benachrichtigungen', ok: notifOk, info: notifOk ? 'Erlaubt' : 'Berechtigung verweigert' },
-    { label: 'Push-Token', ok: tokenFrisch, info: tokenInfo },
-  ];
-
-  // Native App: zusätzliche Checks
-  if (istNativeApp) {
-    const akkuOk = typeof BatteryOptimization !== 'undefined'
-      ? BatteryOptimization.isIgnoring()
-      : true; // wenn Bridge nicht vorhanden, nicht als Fehler werten
-    _statusDetails.push({
-      label: 'Akkuoptimierung',
-      ok: akkuOk,
-      info: akkuOk ? 'Deaktiviert ✓' : 'Aktiv – Alarme könnten verzögert ankommen'
-    });
-  }
-
-  lampe.style.background = allesOk ? '#22c55e' : '#ef4444';
-  lampe.style.boxShadow  = `0 0 6px ${allesOk ? '#22c55e' : '#ef4444'}`;
-  lampe.title = allesOk ? 'Alles bereit – tippen für Details' : grund;
-
-  if (allesOk) {
-    _statusWarnungGesendet = false;
-  } else if (!_statusWarnungGesendet && fw.profil?.notif_status !== false) {
-    _statusWarnungGesendet = true;
-    if (Notification.permission === 'granted') {
-      new Notification('⚠️ Ortswehr – Problem erkannt', {
-        body: grund + ' – Einsatzalarme können möglicherweise nicht empfangen werden!',
-        icon: '/ortswehr/icons/icon-192.png',
-        tag: 'status-warnung',
-        requireInteraction: true,
+    // Detail-Status für Modal
+    _statusDetails = [
+      { label: 'Internetverbindung', ok: online,      info: online      ? 'Verbunden'         : 'Nicht verbunden' },
+      { label: 'Push-Token',         ok: tokenFrisch, info: tokenInfo },
+    ];
+    if (!istNativeApp) {
+      _statusDetails.splice(1, 0, {
+        label: 'Benachrichtigungen',
+        ok: notifOk,
+        info: notifOk ? 'Erlaubt' : 'Berechtigung verweigert'
       });
     }
+
+    // Native App: Akkuoptimierung prüfen
+    if (istNativeApp) {
+      let akkuOk = true;
+      try {
+        const pm = window.PowerManager;
+        akkuOk = pm ? pm.isIgnoringBatteryOptimizations() : true;
+      } catch(e) {}
+      _statusDetails.push({
+        label: 'Akkuoptimierung',
+        ok: akkuOk,
+        info: akkuOk ? 'Deaktiviert ✓' : 'Aktiv – kann Alarme verzögern'
+      });
+    }
+
+    lampe.style.background = allesOk ? '#22c55e' : '#ef4444';
+    lampe.style.boxShadow  = `0 0 6px ${allesOk ? '#22c55e' : '#ef4444'}`;
+    lampe.title = allesOk ? 'Alles bereit – tippen für Details' : grund;
+
+    if (allesOk) {
+      _statusWarnungGesendet = false;
+    } else if (!_statusWarnungGesendet && fw.profil?.notif_status !== false) {
+      _statusWarnungGesendet = true;
+      if (typeof Notification !== 'undefined' && Notification.permission === 'granted') {
+        new Notification('⚠️ Ortswehr – Problem erkannt', {
+          body: grund + ' – Einsatzalarme können möglicherweise nicht empfangen werden!',
+          icon: '/ortswehr/icons/icon-192.png',
+          tag: 'status-warnung',
+          requireInteraction: true,
+        });
+      }
+    }
+    _letzterStatus = allesOk;
+  } catch(e) {
+    console.error('Status-Check Fehler:', e.message);
+    // Lampe grau lassen bei Fehler
   }
-  _letzterStatus = allesOk;
 }
 
 function startStatusPruefung() {

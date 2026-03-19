@@ -1890,7 +1890,7 @@ registerPage('lehrgaenge', async (el) => {
           return `<div class="list-item">
             <div class="list-item-body">
               <div class="list-item-title">${u ? kurzName(u.vorname, u.nachname) : '–'} · ${p.lehrgang}</div>
-              <div class="list-item-sub">${p.tage ? p.tage+' Tage' : ''}${p.bemerkung ? (p.tage?' · ':'')+p.bemerkung : ''}${!p.tage&&!p.bemerkung?'Geplant':''}</div>
+              <div class="list-item-sub">${p.datum ? datum(p.datum)+' · ' : ''}${p.tage ? p.tage+' Tage' : ''}${p.bemerkung ? (p.tage?' · ':'')+p.bemerkung : ''}${!p.datum&&!p.tage&&!p.bemerkung?'Geplant':''}</div>
             </div>
             <button class="btn btn-sm btn-danger" onclick="planungLoeschen('${p.id}')">🗑</button>
           </div>`;
@@ -1912,6 +1912,10 @@ registerPage('lehrgaenge', async (el) => {
             <option value="">– wählen –</option>
             ${ALLE_LEHRGAENGE.map(l => `<option value="${l}">${l}</option>`).join('')}
           </select>
+        </div>
+        <div class="form-row">
+          <label>Geplantes Datum (optional)</label>
+          <input id="plan-datum" type="date">
         </div>
         <div class="form-row">
           <label>Geplante Tage (optional)</label>
@@ -2062,7 +2066,8 @@ registerPage('lehrgaenge', async (el) => {
     if (!userId || !lehrgang) { fw.toast('Kamerad und Lehrgang wählen', true); return; }
     const tage = parseInt(document.getElementById('plan-tage').value) || null;
     const bemerkung = document.getElementById('plan-bem').value.trim();
-    await fw.addDoc('lehrgangsplanung', { userId, lehrgang, jahr, tage, bemerkung });
+    const datumStr = document.getElementById('plan-datum').value || null;
+    await fw.addDoc('lehrgangsplanung', { userId, lehrgang, jahr, tage, bemerkung, datum: datumStr });
     fw.toast('Gespeichert ✅');
     renderPlanung();
   };

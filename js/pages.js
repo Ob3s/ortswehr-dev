@@ -1453,7 +1453,7 @@ registerPage('einstellungen', async (el) => {
     <div class="section-header">🚨 Alarm-Lautstärke</div>
     <div class="card">
       <div style="color:var(--muted);font-size:0.82rem;margin-bottom:0.9rem">
-        Laut = 80 % &nbsp;·&nbsp; Leise = 30 % &nbsp;·&nbsp; Stumm = kein Ton (Vibration bleibt aktiv)
+        Laut = 80 % &nbsp;·&nbsp; Leise = 30 % &nbsp;·&nbsp; Stumm = kein Ton, keine Vibration
       </div>
       <div id="alarm-profil-buttons" style="display:flex;gap:0.5rem;width:100%;box-sizing:border-box">
         ${renderButtons(aktivProfil)}

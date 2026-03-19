@@ -1346,6 +1346,7 @@ registerPage('profil', async (el) => {
             <div style="display:flex;align-items:center;gap:0.5rem;padding:0.35rem 0;${i > 0 ? 'border-top:1px solid var(--border)' : ''}">
               <div style="flex:1;font-size:0.85rem;color:var(--muted)">${p.lehrgang}</div>
               <div style="font-size:0.78rem;color:var(--muted)">${p.datum ? (([y,m,d]) => `${d}.${m}.${y}`)(p.datum.split('-')) : String(p.jahr||'')} · geplant</div>
+              <button onclick="planungLoeschenDirekt('${p.id}')" style="background:none;border:none;color:#9ca3af;font-size:0.85rem;cursor:pointer;padding:0.2rem 0.4rem">🗑</button>
             </div>`).join('')}
         </div>` : ''}
     </div>
@@ -1454,6 +1455,13 @@ window.alarmSelbsttest = async () => {
   } catch(e) {
     fw.toast('Fehler: ' + e.message, true);
   }
+};
+
+window.planungLoeschenDirekt = async (id) => {
+  if (!confirm('Eintrag löschen?')) return;
+  await fw.deleteDoc('lehrgangsplanung/'+id);
+  fw.toast('Gelöscht');
+  navigate(window._currentPage, window._currentParams);
 };
 
 window.abmelden = async () => {
@@ -2500,6 +2508,7 @@ registerPage('kamerad-detail', async (el, {id}) => {
                 <div class="list-item-title" style="color:var(--muted)">${p.lehrgang}</div>
                 <div class="list-item-sub">${p.datum ? (([y,m,d]) => `${d}.${m}.${y}`)(p.datum.split('-')) : p.jahr} · geplant${p.bemerkung?' · '+p.bemerkung:''}</div>
               </div>
+              <button onclick="planungLoeschenDirekt('${p.id}')" style="background:none;border:none;color:#9ca3af;font-size:0.85rem;cursor:pointer;padding:0.2rem 0.4rem">🗑</button>
             </div>`).join('')}
         </div>` : ''}
     </div>

@@ -1342,8 +1342,8 @@ registerPage('profil', async (el) => {
       ${renderQualisProfil(qualis, me)}
       ${planung.length ? `
         <div style="margin-top:0.5rem;padding-top:0.5rem;border-top:1px solid var(--border)">
-          ${planung.sort((a,b) => (a.datum||'').localeCompare(b.datum||'')).map(p => `
-            <div style="display:flex;align-items:center;gap:0.5rem;padding:0.35rem 0;border-bottom:1px solid var(--border)">
+          ${planung.sort((a,b) => (a.datum||'').localeCompare(b.datum||'')).map((p,i) => `
+            <div style="display:flex;align-items:center;gap:0.5rem;padding:0.35rem 0;${i > 0 ? 'border-top:1px solid var(--border)' : ''}">
               <div style="flex:1;font-size:0.85rem;color:var(--muted)">${p.lehrgang}</div>
               <div style="font-size:0.78rem;color:var(--muted)">${p.datum ? (([y,m,d]) => `${d}.${m}.${y}`)(p.datum.split('-')) : String(p.jahr||'')} · geplant</div>
             </div>`).join('')}
@@ -1896,7 +1896,8 @@ registerPage('lehrgaenge', async (el) => {
           return na.localeCompare(nb,'de') || (a.lehrgang||'').localeCompare(b.lehrgang||'');
         }).map(p => {
           const u = usersMap.get(p.userId);
-          return `<div class="list-item">
+          const idx = planung.indexOf(p);
+          return `<div class="list-item" style="${idx > 0 ? 'border-top:1px solid var(--border)' : ''}">
             <div class="list-item-body">
               <div class="list-item-title">${u ? kurzName(u.vorname, u.nachname) : '–'}</div>
               <div class="list-item-sub">${p.lehrgang}${p.datum ? ' · '+(([y,m,d]) => `${d}.${m}.${y}`)(p.datum.split('-')) : ''}${p.tage ? ' · '+p.tage+' Tage' : ''}${p.bemerkung ? ' · '+p.bemerkung : ''}</div>
@@ -2493,8 +2494,8 @@ registerPage('kamerad-detail', async (el, {id}) => {
       ${renderQualis(qualis, id, u)}
       ${geplanteNeu.length ? `
         <div style="margin-top:0.5rem;padding-top:0.5rem;border-top:1px solid var(--border)">
-          ${geplanteNeu.map(p => `
-            <div class="list-item" style="border-bottom:1px solid var(--border)">
+          ${geplanteNeu.map((p,i) => `
+            <div class="list-item" style="${i > 0 ? 'border-top:1px solid var(--border)' : ''}">
               <div class="list-item-body">
                 <div class="list-item-title" style="color:var(--muted)">${p.lehrgang}</div>
                 <div class="list-item-sub">${p.datum ? (([y,m,d]) => `${d}.${m}.${y}`)(p.datum.split('-')) : p.jahr} · geplant${p.bemerkung?' · '+p.bemerkung:''}</div>

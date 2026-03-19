@@ -1440,7 +1440,7 @@ registerPage('einstellungen', async (el) => {
   fw.showBack(() => navigateBack());
 
   const isNative = typeof window.AlarmSettings !== 'undefined';
-  const aktivProfil = isNative ? window.AlarmSettings.getProfil() : 'laut';
+  const aktivProfil = isNative ? (window.AlarmSettings.getProfil() || 'leise') : 'leise';
   const profilLabel = { laut: '🔊 Laut', leise: '🔉 Leise', stumm: '🔇 Stumm' };
 
   // Aktuelles Profil laden für Notif-Checkboxen
@@ -1511,6 +1511,11 @@ registerPage('einstellungen', async (el) => {
     document.getElementById('alarm-profil-buttons').innerHTML = renderButtons(profil);
     fw.toast(profil === 'laut' ? '🔊 Laut' : profil === 'leise' ? '🔉 Leise' : '🔇 Stumm');
   };
+
+  // Default setzen wenn noch nichts gespeichert
+  if (isNative && !window.AlarmSettings.getProfil()) {
+    window.AlarmSettings.setProfil('leise');
+  }
 });
 
 

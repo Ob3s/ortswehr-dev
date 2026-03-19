@@ -1195,9 +1195,9 @@ window.uebungSpeichern = async (id, forcTyp) => {
 // Profil-Ansicht: sortierte Lehrgänge ohne Bearbeiten-Button
 function renderQualisProfil(qualis, me) {
   if (!qualis.length) return '<p class="muted" style="font-size:0.85rem">Keine eingetragen</p>';
-  const QUALI_REIHENFOLGE = ['Truppmann','Sprechfunk','AGT','TH-Grund','Maschinist','Absturzsicherung','ABC-Grund','Truppführer','Gruppenführer','Zugführer','Wehrführer','Erste-Hilfe','Motorsäge A/B','Motorsäge C/D'];
+  const QUALI_REIHENFOLGE = getLehrgangsReihenfolge();
   const qualiIdx = (bez) => { const i = QUALI_REIHENFOLGE.findIndex(r => r.toLowerCase() === (bez||'').trim().toLowerCase()); return i < 0 ? 99 : i; };
-  const trennerIdx = QUALI_REIHENFOLGE.indexOf('Wehrführer');
+  const trennerIdx = -1; // kein Trenner mehr, Sortierung kommt aus Firestore
   const sorted = [...qualis].sort((a,b) => qualiIdx(a.bezeichnung) - qualiIdx(b.bezeichnung));
   let html = '', trennerGezeigt = false;
   for (const q of sorted) {
@@ -1298,6 +1298,7 @@ function checkDeepLink() {
 // ── Profil ────────────────────────────────────────────────
 registerPage('profil', async (el) => {
   fw.setTitle('Mein Profil');
+  await ladeLehrgangsarten();
   // Immer frisch laden damit notif-Felder aktuell sind
   const [meSnap, qSnap, aSnap, pDiensteSnap, pEinsaetzeSnap, planSnap] = await Promise.all([
     fw.getDoc('users/'+fw.user.uid),
@@ -1561,6 +1562,7 @@ registerPage('einstellungen', async (el) => {
 
 // ── Statistik ─────────────────────────────────────────────
 registerPage('statistik', async (el) => {
+  await ladeLehrgangsarten();
   fw.setTitle('Statistik');
   fw.showBack(() => navigateBack());
   el.innerHTML = '<div class="empty">⏳ Lade...</div>';
@@ -1755,32 +1757,36 @@ registerPage('statistik', async (el) => {
 
 
 // ── Lehrgangsverwaltung ───────────────────────────────────
-const ALLE_LEHRGAENGE = ['Truppmann','Truppführer','Gruppenführer','Zugführer','Wehrführer','AGT','Maschinist','Sprechfunk','TH-Grund','Absturzsicherung','ABC-Grund','Erste-Hilfe','Motorsäge A/B','Motorsäge C/D'];
+// Lehrgangsarten werden dynamisch aus Firestore geladen
+let _lehrgangsarten = []; // [{id, bezeichnung, tage, stunden, wochentag, sortierung}]
+let _lehrgangsartenGeladen = false;
 
-// Lehrgänge die ausschließlich an Werktagen stattfinden
-const WERKTAG_LEHRGAENGE = ['Gruppenführer','Zugführer','Wehrführer'];
-const BELIEBIG_LEHRGAENGE  = ['Erste-Hilfe']; // beliebige Wochentage
+async function ladeLehrgangsarten() {
+  if (_lehrgangsartenGeladen) return _lehrgangsarten;
+  const snap = await fw.getDocs('lehrgangsarten');
+  _lehrgangsarten = snap.docs
+    .map(d => ({id: d.id, ...d.data()}))
+    .sort((a, b) => (a.sortierung||99) - (b.sortierung||99));
+  _lehrgangsartenGeladen = true;
+  return _lehrgangsarten;
+}
 
-// Vorlagen: { tage, stunden } – Stunden/Tag wird berechnet
-const LEHRGANG_VORLAGEN = {
-  'Truppführer':     { tage: 5,  stunden: 35 },
-  'Gruppenführer':   { tage: 10, stunden: 70 },
-  'Zugführer':       { tage: 10, stunden: 70 },
-  'Wehrführer':      { tage: 3,  stunden: 24 },
-  'AGT':             { tage: 4,  stunden: 38 },
-  'Maschinist':      { tage: 4,  stunden: 35 },
-  'Sprechfunk':      { tage: 3,  stunden: 32 },
-  'TH-Grund':        { tage: 4,  stunden: 35 },
-  'Absturzsicherung':{ tage: 3,  stunden: 29 },
-  'ABC-Grund':       { tage: 10, stunden: 70 },
-  'Erste-Hilfe':     { tage: 1,  stunden: 8  },
-  'Motorsäge A/B':   { tage: 2,  stunden: 16 },
-  'Motorsäge C/D':   { tage: 2,  stunden: 16 },
-};
+function getLehrgangsartenNamen() {
+  return _lehrgangsarten.map(l => l.bezeichnung);
+}
+
+function getLehrgangsVorlage(bezeichnung) {
+  return _lehrgangsarten.find(l => l.bezeichnung === bezeichnung);
+}
+
+function getLehrgangsReihenfolge() {
+  return _lehrgangsarten.map(l => l.bezeichnung);
+}
 
 function berechneEndDatum(startDatumStr, tage, lehrgang) {
-  const nurWerktage = WERKTAG_LEHRGAENGE.includes(lehrgang);
-  const beliebig    = BELIEBIG_LEHRGAENGE.includes(lehrgang);
+  const art = getLehrgangsVorlage(lehrgang);
+  const nurWerktage = art?.wochentag === 'werktag';
+  const beliebig    = art?.wochentag === 'beliebig';
   const d = new Date(startDatumStr);
   let gezaehlt = 0;
   while (gezaehlt < tage) {
@@ -1798,8 +1804,132 @@ function berechneEndDatum(startDatumStr, tage, lehrgang) {
   return d.toISOString().slice(0, 10);
 }
 
+// ── Lehrgangsarten verwalten ──────────────────────────────
+registerPage('lehrgangsarten-verwalten', async (el) => {
+  if (!fw.isWehrfuehrer()) { navigate('dashboard'); return; }
+  fw.setTitle('Lehrgangsarten');
+  fw.showBack(() => navigateBack());
+  fw.showHeaderAction('+ Neu', () => navigate('lehrgangsart-form', {}));
+
+  _lehrgangsartenGeladen = false;
+  const arten = await ladeLehrgangsarten();
+
+  const renderListe = () => {
+    el.innerHTML = `
+      <div class="card" style="padding:0">
+        ${arten.length === 0 ? '<div class="empty" style="padding:1rem">Noch keine Lehrgangsarten</div>' :
+          arten.map((a, i) => `
+            <div class="list-item">
+              <div class="list-item-body" onclick="navigate('lehrgangsart-form',{id:'${a.id}'})" style="cursor:pointer">
+                <div class="list-item-title">${a.bezeichnung}</div>
+                <div class="list-item-sub">${a.tage ? a.tage+' Tage' : '–'}${a.stunden ? ' · '+a.stunden+'h' : ''}${a.wochentag ? ' · '+a.wochentag : ''}</div>
+              </div>
+              <div style="display:flex;flex-direction:column;gap:0.2rem">
+                <button onclick="lehrgangsartHoch('${a.id}')" ${i===0?'disabled':''} style="background:none;border:none;color:${i===0?'#ccc':'var(--text)'};cursor:pointer;padding:0.1rem 0.4rem;font-size:1rem">▲</button>
+                <button onclick="lehrgangsartRunter('${a.id}')" ${i===arten.length-1?'disabled':''} style="background:none;border:none;color:${i===arten.length-1?'#ccc':'var(--text)'};cursor:pointer;padding:0.1rem 0.4rem;font-size:1rem">▼</button>
+              </div>
+            </div>`).join('')}
+      </div>`;
+  };
+
+  renderListe();
+
+  window.lehrgangsartHoch = async (id) => {
+    const idx = arten.findIndex(a => a.id === id);
+    if (idx <= 0) return;
+    [arten[idx-1], arten[idx]] = [arten[idx], arten[idx-1]];
+    await speicherSortierung(arten);
+    renderListe();
+  };
+
+  window.lehrgangsartRunter = async (id) => {
+    const idx = arten.findIndex(a => a.id === id);
+    if (idx >= arten.length-1) return;
+    [arten[idx], arten[idx+1]] = [arten[idx+1], arten[idx]];
+    await speicherSortierung(arten);
+    renderListe();
+  };
+
+  async function speicherSortierung(liste) {
+    await Promise.all(liste.map((a, i) =>
+      fw.updateDoc('lehrgangsarten/'+a.id, { sortierung: i+1 })
+    ));
+    _lehrgangsartenGeladen = false;
+    await ladeLehrgangsarten();
+  }
+});
+
+registerPage('lehrgangsart-form', async (el, {id}) => {
+  if (!fw.isWehrfuehrer()) { navigate('dashboard'); return; }
+  let art = null;
+  if (id) {
+    const snap = await fw.getDoc('lehrgangsarten/'+id);
+    if (snap.exists()) art = {id, ...snap.data()};
+  }
+  fw.setTitle(art ? 'Lehrgangsart bearbeiten' : 'Neue Lehrgangsart');
+  fw.showBack(() => navigateBack());
+
+  el.innerHTML = `
+    <div class="card">
+      <div class="form-row"><label>Bezeichnung</label>
+        <input id="la-bez" value="${art?.bezeichnung||''}" placeholder="z.B. ABC-Grund">
+      </div>
+      <div class="form-row"><label>Tage (optional)</label>
+        <input id="la-tage" type="number" min="1" max="30" value="${art?.tage||''}" placeholder="z.B. 5">
+      </div>
+      <div class="form-row"><label>Stunden gesamt (optional)</label>
+        <input id="la-stunden" type="number" min="1" max="300" step="0.5" value="${art?.stunden||''}" placeholder="z.B. 35">
+      </div>
+      <div class="form-row"><label>Wochentag-Typ</label>
+        <select id="la-wochentag">
+          <option value="wochenende" ${(art?.wochentag||'wochenende')==='wochenende'?'selected':''}>Wochenende</option>
+          <option value="werktag"    ${art?.wochentag==='werktag'   ?'selected':''}>Werktag</option>
+          <option value="beliebig"   ${art?.wochentag==='beliebig'  ?'selected':''}>Beliebig</option>
+        </select>
+      </div>
+      <div class="btn-row">
+        <button class="btn btn-primary btn-full" onclick="lehrgangsartSpeichern('${id||''}')">💾 Speichern</button>
+        ${art ? `<button class="btn btn-danger" onclick="lehrgangsartLoeschen('${id}')">🗑 Löschen</button>` : ''}
+      </div>
+    </div>`;
+
+  window.lehrgangsartSpeichern = async (artId) => {
+    const bez = document.getElementById('la-bez').value.trim();
+    if (!bez) { fw.toast('Bezeichnung erforderlich', true); return; }
+    const data = {
+      bezeichnung: bez,
+      tage:        parseFloat(document.getElementById('la-tage').value)    || null,
+      stunden:     parseFloat(document.getElementById('la-stunden').value) || null,
+      wochentag:   document.getElementById('la-wochentag').value,
+    };
+    if (artId) {
+      await fw.updateDoc('lehrgangsarten/'+artId, data);
+    } else {
+      const snap = await fw.getDocs('lehrgangsarten');
+      data.sortierung = snap.size + 1;
+      const docId = bez.toLowerCase().replace(/[^a-z0-9]/g, '-');
+      await fw.setDoc('lehrgangsarten/'+docId, data);
+    }
+    _lehrgangsartenGeladen = false;
+    await ladeLehrgangsarten();
+    fw.toast('Gespeichert ✅');
+    navigate('lehrgangsarten-verwalten');
+  };
+
+  window.lehrgangsartLoeschen = async (artId) => {
+    if (!confirm('Lehrgangsart wirklich löschen?')) return;
+    await fw.deleteDoc('lehrgangsarten/'+artId);
+    _lehrgangsartenGeladen = false;
+    await ladeLehrgangsarten();
+    fw.toast('Gelöscht');
+    navigate('lehrgangsarten-verwalten');
+  };
+});
+
 registerPage('lehrgaenge', async (el) => {
+  await ladeLehrgangsarten();
   fw.setTitle('Lehrgänge');
+  if (fw.isWehrfuehrer()) fw.showHeaderAction('⚙️ Verwalten', () => navigate('lehrgangsarten-verwalten'));
   fw.showBack(() => navigateBack());
 
   const jahrAkt = new Date().getFullYear();
@@ -1928,7 +2058,7 @@ registerPage('lehrgaenge', async (el) => {
           <label>Lehrgang</label>
           <select id="plan-lehrgang" onchange="planVorlageLaden()">
             <option value="">– wählen –</option>
-            ${ALLE_LEHRGAENGE.map(l => `<option value="${l}">${l}</option>`).join('')}
+            ${getLehrgangsartenNamen().map(l => `<option value="${l}">${l}</option>`).join('')}
           </select>
         </div>
         <div class="form-row">
@@ -1949,8 +2079,8 @@ registerPage('lehrgaenge', async (el) => {
     window.planJahrWechsel = (j) => { planJahr = parseInt(j); renderPlanung(); };
     window.planVorlageLaden = () => {
       const l = document.getElementById('plan-lehrgang').value;
-      const v = LEHRGANG_VORLAGEN[l];
-      if (v) document.getElementById('plan-tage').value = v.tage;
+      const v = getLehrgangsVorlage(l);
+      if (v) document.getElementById('plan-tage').value = v.tage || '';
     };
   };
 
@@ -1971,7 +2101,7 @@ registerPage('lehrgaenge', async (el) => {
           <label>Lehrgang</label>
           <select id="erf-lehrgang" onchange="erfVorlageLaden()">
             <option value="">– wählen –</option>
-            ${ALLE_LEHRGAENGE.map(l => `<option value="${l}">${l}</option>`).join('')}
+            ${getLehrgangsartenNamen().map(l => `<option value="${l}">${l}</option>`).join('')}
           </select>
         </div>
         <div class="form-row">
@@ -2014,7 +2144,7 @@ registerPage('lehrgaenge', async (el) => {
 
     window.erfVorlageLaden = () => {
       const lehrgang = document.getElementById('erf-lehrgang').value;
-      const vorlage = LEHRGANG_VORLAGEN[lehrgang];
+      const vorlage = getLehrgangsVorlage(lehrgang);
       if (vorlage) {
         document.getElementById('erf-tage').value = vorlage.tage;
         document.getElementById('erf-stunden').value = vorlage.stunden;
@@ -2363,14 +2493,15 @@ window.ortMigration = async () => {
   btn.disabled = false;
 };
 
-const QUALI_REIHENFOLGE = ['Truppmann','Sprechfunk','AGT','TH-Grund','Maschinist','Absturzsicherung','ABC-Grund','Truppführer','Gruppenführer','Zugführer','Wehrführer','Erste-Hilfe','Motorsäge A/B','Motorsäge C/D'];
-const QUALI_TRENNER_NACH = 'Wehrführer';
+// QUALI_REIHENFOLGE kommt jetzt aus _lehrgangsarten (dynamisch)
+const QUALI_TRENNER_NACH = null; // kein fixer Trenner mehr
 
 function renderQualis(qualis, userId, u) {
   if (!qualis.length) return '<p class="muted" style="font-size:0.85rem">Keine</p>';
   // Bezeichnung normalisieren (trim + Groß-/Kleinschreibung)
   const qualiIdx = (bez) => {
     const b = (bez||'').trim();
+    const QUALI_REIHENFOLGE = getLehrgangsReihenfolge();
     const i = QUALI_REIHENFOLGE.findIndex(r => r.toLowerCase() === b.toLowerCase());
     return i < 0 ? 99 : i;
   };
@@ -2439,6 +2570,7 @@ function renderAgtFelder(u, id, qualis) {
 }
 
 registerPage('kamerad-detail', async (el, {id}) => {
+  await ladeLehrgangsarten();
   const snap = await fw.getDoc('users/'+id);
   if (!snap.exists()) { el.innerHTML='<div class="empty">Nicht gefunden</div>'; return; }
   const u = {id,...snap.data()};
@@ -2585,6 +2717,7 @@ window.agtSpeichern = async (userId) => {
 };
 
 registerPage('kamerad-form', async (el, {id}) => {
+  await ladeLehrgangsarten();
   let u = null;
   if (id) { const s=await fw.getDoc('users/'+id); if(s.exists()) u={id,...s.data()}; }
   fw.setTitle(u ? 'Bearbeiten' : 'Neuer Kamerad');

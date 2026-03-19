@@ -1352,6 +1352,7 @@ registerPage('profil', async (el) => {
         <button class="btn btn-secondary btn-sm" style="flex:1" onclick="navigate('einstellungen')">Einstellungen</button>
         <button class="btn btn-secondary btn-sm" style="flex:1" onclick="pruefeAufUpdate(true)">🔄 Updates</button>
       </div>
+      <button class="btn btn-secondary btn-full" style="margin-bottom:0.5rem" onclick="alarmSelbsttest()">🔔 Alarm-Selbsttest</button>
       <button class="btn btn-danger btn-full" onclick="abmelden()">Abmelden</button>
     </div>
   `;
@@ -1422,6 +1423,28 @@ window.passwortAendern = async () => {
     document.getElementById('pw-alt').value = '';
     document.getElementById('pw-neu').value = '';
   } catch(e) { fw.toast('Altes Passwort falsch', true); }
+};
+
+window.alarmSelbsttest = async () => {
+  const token = fw.profil?.fcmToken;
+  if (!token) {
+    fw.toast('Kein Push-Token vorhanden – bitte App neu starten', true);
+    return;
+  }
+  try {
+    await fw.addDoc('push_queue', {
+      tokens: [token],
+      title: '🚨 EINSATZ ALARM',
+      body: 'Selbsttest – Alarm funktioniert!',
+      alarm: true,
+      uebungId: '',
+      erstelltAm: new Date(),
+      erstelltVon: fw.user.uid,
+    });
+    fw.toast('Testaalarm gesendet – du solltest gleich alarmiert werden 🔔');
+  } catch(e) {
+    fw.toast('Fehler: ' + e.message, true);
+  }
 };
 
 window.abmelden = async () => {

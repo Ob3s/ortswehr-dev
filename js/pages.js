@@ -1342,12 +1342,12 @@ registerPage('profil', async (el) => {
       <div class="card-title" style="margin-bottom:0.5rem">Lehrgänge</div>
       ${renderQualisProfil(qualis, me)}
       ${planung.length ? `
-        <div style="margin-top:0.5rem;padding-top:0.5rem;border-top:1px solid var(--border)">
+        <div style="margin-top:0.5rem;padding-top:0.5rem">
           ${planung.sort((a,b) => (a.datum||'').localeCompare(b.datum||'')).map((p,i) => `
             <div style="display:flex;align-items:center;gap:0.5rem;padding:0.35rem 0;${i > 0 ? 'border-top:1px solid var(--border)' : ''}">
               <div style="flex:1;font-size:0.85rem;color:var(--muted)">${p.lehrgang}</div>
               <div style="font-size:0.78rem;color:var(--muted)">${p.datum ? (([y,m,d]) => `${d}.${m}.${y}`)(p.datum.split('-')) : String(p.jahr||'')} · geplant</div>
-              <button onclick="planungLoeschenDirekt('${p.id}')" style="background:none;border:none;color:#9ca3af;font-size:0.85rem;cursor:pointer;padding:0.2rem 0.4rem">🗑</button>
+              <button onclick="planungLoeschenDirekt('${p.id}')" class="btn btn-sm btn-danger">🗑</button>
             </div>`).join('')}
         </div>` : ''}
     </div>
@@ -2632,14 +2632,14 @@ registerPage('kamerad-detail', async (el, {id}) => {
       <div class="card-title">Lehrgänge</div>
       ${renderQualis(qualis, id, u)}
       ${geplanteNeu.length ? `
-        <div style="margin-top:0.5rem;padding-top:0.5rem;border-top:1px solid var(--border)">
+        <div style="margin-top:0.5rem;padding-top:0.5rem">
           ${geplanteNeu.map((p,i) => `
             <div class="list-item" style="${i > 0 ? 'border-top:1px solid var(--border)' : ''}">
               <div class="list-item-body">
                 <div class="list-item-title" style="color:var(--muted)">${p.lehrgang}</div>
                 <div class="list-item-sub">${p.datum ? (([y,m,d]) => `${d}.${m}.${y}`)(p.datum.split('-')) : p.jahr} · geplant${p.bemerkung?' · '+p.bemerkung:''}</div>
               </div>
-              <button onclick="planungLoeschenDirekt('${p.id}')" style="background:none;border:none;color:#9ca3af;font-size:0.85rem;cursor:pointer;padding:0.2rem 0.4rem">🗑</button>
+              <button onclick="planungLoeschenDirekt('${p.id}')" class="btn btn-sm btn-danger">🗑</button>
             </div>`).join('')}
         </div>` : ''}
     </div>

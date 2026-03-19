@@ -2498,17 +2498,16 @@ const QUALI_TRENNER_NACH = null; // kein fixer Trenner mehr
 
 function renderQualis(qualis, userId, u) {
   if (!qualis.length) return '<p class="muted" style="font-size:0.85rem">Keine</p>';
-  // Bezeichnung normalisieren (trim + Groß-/Kleinschreibung)
+  const _reihenfolge = getLehrgangsReihenfolge();
   const qualiIdx = (bez) => {
     const b = (bez||'').trim();
-    const QUALI_REIHENFOLGE = getLehrgangsReihenfolge();
-    const i = QUALI_REIHENFOLGE.findIndex(r => r.toLowerCase() === b.toLowerCase());
+    const i = _reihenfolge.findIndex(r => r.toLowerCase() === b.toLowerCase());
     return i < 0 ? 99 : i;
   };
   const sorted = [...qualis].sort((a, b) => qualiIdx(a.bezeichnung) - qualiIdx(b.bezeichnung));
   let html = '';
   let trennerGezeigt = false;
-  const trennerIdx = QUALI_REIHENFOLGE.indexOf(QUALI_TRENNER_NACH);
+  const trennerIdx = -1; // kein fixer Trenner
   for (const q of sorted) {
     const istErsterNachTrenner = !trennerGezeigt && qualiIdx(q.bezeichnung) > trennerIdx;
     if (istErsterNachTrenner) trennerGezeigt = true;

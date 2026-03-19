@@ -2460,7 +2460,7 @@ registerPage('kamerad-detail', async (el, {id}) => {
         <div class="list-item" style="border-bottom:1px solid var(--border)">
           <div class="list-item-body">
             <div class="list-item-title">${p.lehrgang}</div>
-            <div class="list-item-sub">${p.startdatum ? datum(p.startdatum) : (p.jahr ? p.jahr : '–')}${p.bemerkung?' · '+p.bemerkung:''}</div>
+            <div class="list-item-sub">${p.datum ? (([y,m,d]) => `${d}.${m}.${y}`)(p.datum.split('-')) : p.startdatum ? datum(p.startdatum) : (p.jahr ? p.jahr : '–')}${p.bemerkung?' · '+p.bemerkung:''}</div>
           </div>
           <span class="badge badge-blue">geplant</span>
         </div>`).join('')}

@@ -401,7 +401,7 @@ async function ladeNewsFeed() {
 
     let html = header + aktiv.map(b => renderNewsBeitrag(b, usersMap)).join('');
 
-    if (archiviert.length && fw.isWehrfuehrer()) {
+    if (archiviert.length) {
       html += `<details style="margin-top:0.5rem">
         <summary style="font-size:0.85rem;color:var(--muted);cursor:pointer;padding:0.4rem 0">
           Archiv (${archiviert.length})
@@ -986,7 +986,7 @@ registerPage('uebung-detail', async (el, {id, typ}) => {
         </div>
       ` : ''}
     </div>
-    <div class="section-header" style="margin-top:0.8rem"></div>
+    <div style="margin-top:0.8rem;border-top:1px solid var(--border)"></div>
     <div id="einsatz-reaktionen" class="card">⏳ Lade...</div>
     <div class="card" style="display:flex;gap:0.8rem">
       <button class="btn btn-full" id="btn-kommt"
@@ -3241,10 +3241,16 @@ async function ladePruefaufgabenInline() {
   const ortswehrId = fw.profil?.ortswehrIds?.[0] || fw.profil?.ortswehrId || null;
 
   // Fahrzeuge laden – WF sieht alle, Maschinist nur eigene Ortswehr
+  // Maschinist-Check
+  const myQualiSnap = await fw.getDocs('users/'+fw.user.uid+'/qualifikationen');
+  const myQualis = myQualiSnap.docs.map(d => d.data());
+  const istMaschinist = myQualis.some(q => (q.bezeichnung||'').toLowerCase().includes('maschinist'));
+
   const fahrzeugSnap = await fw.getDocs('fahrzeuge', fw.orderBy('name','asc'));
   const meineWehrIdsFz = fw.profil.ortswehrIds?.length ? fw.profil.ortswehrIds : (fw.profil.ortswehrId ? [fw.profil.ortswehrId] : []);
   const fahrzeuge = fahrzeugSnap.docs
     .map(d => ({id:d.id,...d.data()}))
+    .filter(f => istWF || !f.ortswehrId || meineWehrIdsFz.includes(f.ortswehrId));
     .filter(f => istWF || !f.ortswehrId || meineWehrIdsFz.includes(f.ortswehrId));
 
   // Alle Prüfaufgaben laden
@@ -3329,8 +3335,13 @@ async function ladePruefaufgabenInline() {
     fahrzeugNotizen[f.id] = s?.exists() ? (s.data().text || '') : '';
   }));
 
+  // Offene Dropdowns merken vor dem Re-Render
+  const offeneDetails = new Set(
+    [...el.querySelectorAll('details[open]')].map(d => d.dataset.fzId)
+  );
+
   el.innerHTML = dashHtml + fahrzeuge.map(f => `
-    <details style="margin-bottom:0.5rem;border:1px solid var(--border);border-radius:10px">
+    <details data-fz-id="${f.id}" style="margin-bottom:0.5rem;border:1px solid var(--border);border-radius:10px" ${offeneDetails.has(f.id) ? 'open' : ''}>
       <summary style="padding:0.4rem 0.8rem;cursor:pointer;list-style:none;display:flex;align-items:center;justify-content:space-between;font-weight:600;font-size:13px;border-radius:8px">
         <span>${f.name}${f.bezeichnung ? ` <span style="font-weight:400;color:var(--muted);font-size:0.8rem">(${f.bezeichnung})</span>` : ''}</span>
         <div style="display:flex;gap:0.4rem;align-items:center">

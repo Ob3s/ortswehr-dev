@@ -1,1 +1,1 @@
-[{"version": "20260320104827", "datum": "20.03.2026", "punkte": ["Fix: Passwort-Anfrage Firestore-Fehler behoben"]}]
+[{"version": "20260320105408", "datum": "20.03.2026", "punkte": ["Fix: Passwort-Anfrage \u00fcber Cloud Function (kein Auth n\u00f6tig)"]}]

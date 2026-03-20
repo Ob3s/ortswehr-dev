@@ -2579,6 +2579,13 @@ registerPage('kameraden', async (el) => {
       }
     }
 
+    // Passwort-Reset-Anfragen laden
+    const pwResetSnap = await fw.getDocs('pw_reset_requests', fw.where('erledigt','==',false));
+    for (const d of pwResetSnap.docs) {
+      const r = d.data();
+      aufgaben.push({ typ: 'pw-reset', text: `Passwort zurücksetzen: ${r.userName||r.loginName}`, resetId: d.id, userId: r.userId });
+    }
+
     // Geräteprüfungen: nicht bestandene + kommentierte laden
     const pruefSnap = await fw.getDocs('pruefaufgaben');
     const pruefIssues = pruefSnap.docs
@@ -2650,7 +2657,28 @@ registerPage('kameraden', async (el) => {
       navigate('kameraden');
     };
 
-    window.aufgabeEinblenden = async (key) => {
+    window.pwResetDurchfuehren = async (resetId, userId) => {
+  const neuesPasswort = prompt('Neues Passwort für diesen Kamerad (mind. 6 Zeichen):');
+  if (!neuesPasswort || neuesPasswort.length < 6) { fw.toast('Passwort zu kurz', true); return; }
+  try {
+    // Passwort über Cloud Function setzen
+    const token = await fw.user.getIdToken();
+    const res = await fetch('https://europe-west3-ffw-oegeln-791ca.cloudfunctions.net/resetUserPassword', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer '+token },
+      body: JSON.stringify({ userId, newPassword: neuesPasswort }),
+    });
+    if (!res.ok) throw new Error(await res.text());
+    // Anfrage als erledigt markieren
+    await fw.setDoc('pw_reset_requests/'+resetId, { erledigt: true });
+    fw.toast('Passwort zurückgesetzt ✅');
+    navigate('kameraden');
+  } catch(e) {
+    fw.toast('Fehler: ' + e.message, true);
+  }
+};
+
+window.aufgabeEinblenden = async (key) => {
       const snap = await fw.getDoc('users/'+fw.user.uid+'/settings/aufgaben_ausgeblendet').catch(() => null);
       const ids = new Set((snap?.data()?.ids) || []);
       ids.delete(key);
@@ -2661,11 +2689,6 @@ registerPage('kameraden', async (el) => {
   }
 
   el.innerHTML = `
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:0.6rem;margin-bottom:0.2rem">
-      <button class="btn btn-secondary btn-sm btn-full" onclick="navigate('lehrgaenge')">📚 Lehrgänge</button>
-      ${fw.isWehrfuehrer() ? `<button class="btn btn-secondary btn-sm btn-full" onclick="navigate('einstellungen-admin')" style="margin-top:0.3rem">⚙️ Dienstgrade & Filter</button>` : ''}
-      <button class="btn btn-secondary btn-sm btn-full" onclick="navigate('statistik')">📊 Statistiken</button>
-    </div>
     ${aufgabenHtml}
     <div style="font-size:0.72rem;color:var(--muted);text-align:right;padding:0 0.2rem 0.3rem">Dienststunden (12 Mon.) · Ziel: ${ZIEL}h</div>
     <div class="card">
@@ -2685,6 +2708,13 @@ registerPage('kameraden', async (el) => {
       <summary style="font-weight:600;cursor:pointer;list-style:none;display:flex;align-items:center;gap:0.5rem">🏘️ Ortswehren verwalten</summary>
       <div id="ortswehr-inline" style="margin-top:0.8rem">⏳ Lade...</div>
     </details>` : ''}
+    <div style="display:flex;flex-direction:column;gap:0.4rem;margin-top:0.8rem">
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:0.4rem">
+        <button class="btn btn-secondary btn-sm btn-full" onclick="navigate('lehrgaenge')">Lehrgänge</button>
+        <button class="btn btn-secondary btn-sm btn-full" onclick="navigate('statistik')">Statistiken</button>
+      </div>
+      ${fw.isWehrfuehrer() ? `<button class="btn btn-secondary btn-sm btn-full" onclick="navigate('einstellungen-admin')">Dienstgrade & Filter</button>` : ''}
+    </div>
   `;
   if (fw.isWehrfuehrer()) ladeOrtswehrenInline();
 });

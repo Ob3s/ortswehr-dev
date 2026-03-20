@@ -399,7 +399,12 @@ async function ladeNewsFeed() {
       return;
     }
 
-    let html = header + aktiv.map(b => renderNewsBeitrag(b, usersMap)).join('');
+    let html = header;
+    if (aktiv.length === 0) {
+      html += '<div class="card" style="color:var(--muted);font-size:0.88rem">Keine neuen Neuigkeiten.</div>';
+    } else {
+      html += aktiv.map(b => renderNewsBeitrag(b, usersMap)).join('');
+    }
 
     if (archiviert.length) {
       html += `<details style="margin-top:0.5rem">
@@ -1001,6 +1006,29 @@ registerPage('uebung-detail', async (el, {id, typ}) => {
 
   // Autocomplete für inline Adress-Eingabe (Detail-Seite, kein <script> in innerHTML)
   requestAnimationFrame(() => initOrtAutocomplete('ort-inline'));
+
+  // Live: Ort-Änderungen anderer Geräte sofort anzeigen
+  if (isEinsatz) {
+    const _ortListener = fw.onDocSnapshot('einsaetze/'+id, (snap) => {
+      if (!snap.exists()) return;
+      const live = snap.data();
+      const ortAnzeige = document.getElementById('ort-anzeige');
+      if (!ortAnzeige) { _ortListener(); return; }
+      if (live.ort) {
+        ortAnzeige.innerHTML = `<div style="margin-top:0.5rem;display:flex;align-items:center;gap:0.5rem;flex-wrap:wrap">
+          <span style="font-size:0.85rem">📍 ${live.ort}</span>
+          <a href="https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(live.ort)}" target="_blank"
+            style="font-size:0.75rem;padding:0.2rem 0.6rem;background:var(--panel2);border-radius:20px;color:var(--blue);text-decoration:none;border:1px solid var(--border)">
+            🗺 Navigation
+          </a>
+        </div>`;
+        document.getElementById('ort-inline-wrapper')?.remove();
+      }
+    });
+    // Listener beim Seitenwechsel aufräumen
+    const _origEinsatzListener = window._einsatzListener;
+    window._einsatzListener = () => { _ortListener(); if (_origEinsatzListener) _origEinsatzListener(); };
+  }
 
   // Live-Listener für Reaktionen (Einsatz + Dienst)
   if (true) {

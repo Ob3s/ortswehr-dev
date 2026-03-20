@@ -165,6 +165,12 @@ function initOrtAutocomplete(inputId, onSelect) {
 
 // ── Dienst-Sichtbarkeit ───────────────────────────────────
 function dienstSichtbar(d, profil, qualis) {
+  // Ortswehr-Filter: nur Dienste der eigenen Wehren anzeigen
+  if (d.ortswehrIds?.length) {
+    const meineIds = profil?.ortswehrIds?.length ? profil.ortswehrIds
+      : (profil?.ortswehrId ? [profil.ortswehrId] : []);
+    if (meineIds.length && !d.ortswehrIds.some(id => meineIds.includes(id))) return false;
+  }
   const titel = (d.titel || '').toLowerCase();
   const qs = (qualis || []).map(q => (q.bezeichnung || q.titel || q.name || '').toLowerCase());
   // AGT-Termine
@@ -182,7 +188,7 @@ function dienstSichtbar(d, profil, qualis) {
     const rolle = profil?.rolle || '';
     return ['gruppenführer','zugführer','wehrfuehrer'].includes(rolle);
   }
-  return true; // alle anderen sichtbar
+  return true;
 }
 // ── Nächste Dienste ──────────────────────────────────────
 function dienstKarte(d, label) {
@@ -371,8 +377,10 @@ async function ladeNewsFeed() {
   _newsFeedListener = fw.onQuerySnapshot('news', snap => {
     const jetzt = Date.now();
     const dreissigTage = 30 * 24 * 60 * 60 * 1000;
+    const meineWehrIds = fw.profil.ortswehrIds?.length ? fw.profil.ortswehrIds : (fw.profil.ortswehrId ? [fw.profil.ortswehrId] : []);
     const alle = snap.docs
       .map(d => ({id:d.id,...d.data()}))
+      .filter(d => !d.ortswehrIds?.length || d.ortswehrIds.some(id => meineWehrIds.includes(id)) || fw.isWehrfuehrer())
       .sort((a,b) => (b.erstelltAm?.toMillis?.() || 0) - (a.erstelltAm?.toMillis?.() || 0));
 
     // Automatisch archivieren wenn älter als 30 Tage
@@ -1146,6 +1154,20 @@ registerPage('uebung-form', async (el, {id, typ: vorTyp, alarm: mitAlarm}) => {
         <div class="form-row"><label>Ort (optional)</label>
           <input id="f-ort" value="${u?.ort||''}" placeholder="Gerätehaus Oegeln">
         </div>
+        ${await (async () => {
+          const owSnap2 = await fw.getDocs('ortswehren');
+          const wehren2 = owSnap2.docs.map(d => ({id:d.id,...d.data()}));
+          if (wehren2.length <= 1) return '';
+          const aktiveIds = u?.ortswehrIds || (u?.ortswehrId ? [u.ortswehrId] : (fw.profil.ortswehrIds || []));
+          return `<div class="form-row"><label>Beteiligte Ortswehren</label>
+            <div style="display:flex;flex-direction:column;gap:0.3rem;margin-top:0.2rem">
+              ${wehren2.map(w => `<label style="display:flex;align-items:center;gap:0.5rem;font-size:0.88rem;cursor:pointer">
+                <input type="checkbox" class="f-wehr-cb" value="${w.id}" ${aktiveIds.includes(w.id)?'checked':''} style="width:1rem;height:1rem;accent-color:var(--red)">
+                ${w.name}
+              </label>`).join('')}
+            </div>
+          </div>`;
+        })()}
         ${fw.isWehrfuehrer() ? `
         <div style="display:flex;align-items:center;gap:0.6rem;padding:0.4rem 0;border-top:1px solid var(--border);margin-top:0.2rem">
           <input type="checkbox" id="f-relevant" style="width:1.2rem;height:1.2rem;accent-color:var(--red)" ${u?.relevant===false?'':'checked'}>
@@ -1193,7 +1215,11 @@ window.uebungSpeichern = async (id, forcTyp) => {
   const ort = document.getElementById('f-ort')?.value?.trim() || null;
   const relevantEl = document.getElementById('f-relevant');
   const relevant = isEinsatz ? true : (relevantEl ? relevantEl.checked : true);
-  const data = { titel, datum: new Date(datumStr), typ, dauer_h, beschreibung: beschr, zeitBeginn, zeitEnde, ort, relevant };
+  // Ortswehren: aus Checkboxen oder primäre Wehr des Nutzers
+  const wehrCheckboxen = [...document.querySelectorAll('.f-wehr-cb:checked')].map(cb => cb.value);
+  const ortswehrIds = wehrCheckboxen.length > 0 ? wehrCheckboxen
+    : (fw.profil.ortswehrIds?.length ? fw.profil.ortswehrIds : (fw.profil.ortswehrId ? [fw.profil.ortswehrId] : []));
+  const data = { titel, datum: new Date(datumStr), typ, dauer_h, beschreibung: beschr, zeitBeginn, zeitEnde, ort, relevant, ortswehrIds };
   const isNeu = !id;
   try {
     let uebungId = id;
@@ -1261,12 +1287,14 @@ window.uebungLoeschen = async (id, typ) => {
 
 // ── Push ──────────────────────────────────────────────────
 async function benachrichtigeOrtswehr(typ, titel, datumStr, dauer_h, uebungId) {
-  const ortswehrId = fw.profil.ortswehrId;
+  const ortswehrIds = fw.profil.ortswehrIds?.length ? fw.profil.ortswehrIds : (fw.profil.ortswehrId ? [fw.profil.ortswehrId] : []);
+  const ortswehrId = ortswehrIds[0] || null;
   if (!ortswehrId) {
     fw.toast('⚠️ Keine Ortswehr zugeordnet – niemand wird benachrichtigt!', true);
     return;
   }
-  const usersSnap = await fw.getDocs('users', fw.where('ortswehrId','==',ortswehrId));
+  // Alle User die mindestens eine der betroffenen Wehren haben
+  const usersSnap = await fw.getDocs('users', fw.where('ortswehrIds', 'array-contains', ortswehrId));
   const isEinsatz = typ === 'einsatz';
   const tokens = [];
   for (const d of usersSnap.docs) {
@@ -2257,6 +2285,10 @@ registerPage('news-form', async (el) => {
   let optionen = ['', ''];
   let pdfFile = null;
 
+  // Ortswehren laden für Auswahl
+  const owSnap = await fw.getDocs('ortswehren');
+  const alleWehren = owSnap.docs.map(d => ({id:d.id,...d.data()}));
+
   const render = () => {
     el.innerHTML = `
       <div class="card">
@@ -2293,6 +2325,20 @@ registerPage('news-form', async (el) => {
   };
   render();
 
+  // Wehr-Checkboxen befüllen
+  const wehrBox = document.getElementById('nf-wehr-boxes');
+  if (wehrBox) {
+    if (alleWehren.length <= 1) {
+      document.getElementById('nf-wehr-container')?.remove();
+    } else {
+      wehrBox.innerHTML = alleWehren.map(w => `
+        <label style="display:flex;align-items:center;gap:0.5rem;font-size:0.88rem;cursor:pointer">
+          <input type="checkbox" class="nf-wehr-cb" value="${w.id}" checked style="width:1rem;height:1rem;accent-color:var(--red)">
+          ${w.name}
+        </label>`).join('');
+    }
+  }
+
   window.nfAddOption = () => { optionen.push(''); render(); };
   window.newsSpeichern = async () => {
     const titel  = document.getElementById('nf-titel').value.trim();
@@ -2301,7 +2347,8 @@ registerPage('news-form', async (el) => {
     const btn = document.getElementById('nf-save-btn');
     btn.disabled = true; btn.textContent = '⏳ Wird gespeichert...';
     const hatAbst = document.getElementById('nf-abstimmung-cb')?.checked;
-    const data = { titel, inhalt, erstelltAm: new Date(), erstelltVon: fw.user.uid };
+    const newsWehrIds = [...document.querySelectorAll('.nf-wehr-cb:checked')].map(cb => cb.value);
+    const data = { titel, inhalt, erstelltAm: new Date(), erstelltVon: fw.user.uid, ortswehrIds: newsWehrIds };
     if (hatAbst) {
       const frage = document.getElementById('nf-frage').value.trim();
       const opts  = optionen.filter(o => o.trim());
@@ -2804,7 +2851,7 @@ registerPage('kamerad-form', async (el, {id}) => {
   const owSnap = await fw.getDocs('ortswehren');
   const ortswehren = owSnap.docs.map(d => ({id:d.id,...d.data()}));
   const owOptions = ortswehren.map(o =>
-    `<option value="${o.id}" ${u?.ortswehrId===o.id?'selected':''}>${o.name}</option>`).join('');
+    `<option value="${o.id}" ${(u?.ortswehrIds||[u?.ortswehrId]).includes(o.id)?'selected':''}>${o.name}</option>`).join('');
 
   const datumVal = u?.eintrittsdatum?.toDate ? u.eintrittsdatum.toDate().toISOString().slice(0,10) : (u?.eintrittsdatum||'');
 
@@ -2878,7 +2925,8 @@ window.kameradSpeichern = async (id) => {
     nachname: document.getElementById('k-nn').value,
     dienstgrad: document.getElementById('k-dg').value,
     eintrittsdatum: document.getElementById('k-ed').value || null,
-    ortswehrId: document.getElementById('k-ow').value || null,
+    ortswehrIds: document.getElementById('k-ow').value ? [document.getElementById('k-ow').value] : [],
+    ortswehrId: document.getElementById('k-ow').value || null, // Kompatibilität
     rolle: document.getElementById('k-rolle').value,
     staerkeRolle: document.getElementById('k-rolle').value === 'wehrfuehrer'
       ? (document.getElementById('k-staerke-rolle')?.value || 'kamerad')
@@ -2967,7 +3015,7 @@ async function ladePruefaufgabenInline() {
   if (!el) return;
 
   const istWF = fw.isWehrfuehrer();
-  const ortswehrId = fw.profil?.ortswehrId;
+  const ortswehrId = fw.profil?.ortswehrIds?.[0] || fw.profil?.ortswehrId || null;
 
   // Fahrzeuge laden – WF sieht alle, Maschinist nur eigene Ortswehr
   const fahrzeugSnap = istWF

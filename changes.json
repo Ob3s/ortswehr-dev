@@ -1,1 +1,1 @@
-[{"version": "20260320102949", "datum": "20.03.2026", "punkte": ["NEU: Ortswehr in Kameraden-Liste angezeigt", "NEU: Dienstgrade aus Firestore (verwaltbar)", "NEU: AGT + F\u00fchrungskr\u00e4fte Keywords aus Firestore (verwaltbar)", "NEU: Verwaltungsseite 'Dienstgrade & Filter' im Kameraden-Tab"]}]
+[{"version": "20260320103446", "datum": "20.03.2026", "punkte": ["Fix: Aufgaben-Dropdown im Kameraden-Tab standardm\u00e4\u00dfig zugeklappt", "Fix: 'Wer kommt?' aus Einsatz-Detailseite entfernt"]}]

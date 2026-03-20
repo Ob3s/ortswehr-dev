@@ -166,7 +166,8 @@ function initOrtAutocomplete(inputId, onSelect) {
 // ── Dienst-Sichtbarkeit ───────────────────────────────────
 function dienstSichtbar(d, profil, qualis) {
   // Ortswehr-Filter: nur Dienste der eigenen Wehren anzeigen
-  if (d.ortswehrIds?.length) {
+  // Wehrführer sieht immer alles
+  if (d.ortswehrIds?.length && profil?.rolle !== 'wehrfuehrer') {
     const meineIds = profil?.ortswehrIds?.length ? profil.ortswehrIds
       : (profil?.ortswehrId ? [profil.ortswehrId] : []);
     if (meineIds.length && !d.ortswehrIds.some(id => meineIds.includes(id))) return false;

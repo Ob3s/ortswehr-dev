@@ -593,9 +593,7 @@ function renderEintrag(u, meineMap) {
   const morgen = new Date(heute); morgen.setDate(heute.getDate()+1);
   const istHeute = u.typ === 'einsatz' && d >= heute && d < morgen;
   const highlightStyle = istHeute ? 'border-left:3px solid var(--red);padding-left:0.5rem;background:rgba(220,38,38,0.08);' : '';
-  const nichtRelevantBadge = (u.typ === 'dienst' && u.relevant === false)
-    ? `<span style="font-size:0.7rem;color:var(--muted);background:var(--panel2);border:1px solid var(--border);border-radius:4px;padding:0.1rem 0.35rem;margin-left:0.4rem">nicht relevant</span>`
-    : '';
+  const nichtRelevantBadge = ''; // nicht relevant wird nicht in der Liste angezeigt
   return `<div class="list-item" onclick="navigate('uebung-detail',{id:'${u.id}',typ:'${u.typ}'})" style="${highlightStyle}">
     <div class="list-item-body">
       <div class="list-item-title">${istHeute ? '🚨 ' : ''}${u.titel}${nichtRelevantBadge}</div>
@@ -1367,16 +1365,20 @@ registerPage('profil', async (el) => {
   fw.setTitle('Mein Profil');
   await ladeLehrgangsarten();
   // Immer frisch laden damit notif-Felder aktuell sind
-  const [meSnap, qSnap, aSnap, pDiensteSnap, pEinsaetzeSnap, planSnap] = await Promise.all([
+  const [meSnap, qSnap, aSnap, pDiensteSnap, pEinsaetzeSnap, planSnap, owSnap] = await Promise.all([
     fw.getDoc('users/'+fw.user.uid),
     fw.getDocs('users/'+fw.user.uid+'/qualifikationen'),
     fw.getDocs('anwesenheiten', fw.where('userId','==',fw.user.uid)),
     fw.getDocs('dienste'),
     fw.getDocs('einsaetze'),
     fw.getDocs('lehrgangsplanung', fw.where('userId','==',fw.user.uid)),
+    fw.getDocs('ortswehren'),
   ]);
   const me = meSnap.data() || fw.profil;
   Object.assign(fw.profil, me);
+  const owMapProfil = new Map(owSnap.docs.map(d => [d.id, d.data().name]));
+  const meineWehrNamen = (me.ortswehrIds?.length ? me.ortswehrIds : (me.ortswehrId ? [me.ortswehrId] : []))
+    .map(id => owMapProfil.get(id)).filter(Boolean).join(', ') || '–';
   const qualis = qSnap.docs.map(d => ({id:d.id,...d.data()}));
   const planung = planSnap.docs.map(d => ({id:d.id,...d.data()}));
   const pDienstMap  = new Map(pDiensteSnap.docs.map(d => [d.id, d.data()]));
@@ -1403,6 +1405,7 @@ registerPage('profil', async (el) => {
       <div style="display:flex;gap:1.2rem;flex-wrap:wrap">
         <div><div class="muted" style="font-size:0.72rem">Dienstgrad</div><div class="bold">${me.dienstgrad||'–'}</div></div>
         <div><div class="muted" style="font-size:0.72rem">Eingetreten</div><div class="bold">${datum(me.eintrittsdatum)||'–'}</div></div>
+        <div><div class="muted" style="font-size:0.72rem">Ortswehr</div><div class="bold">${meineWehrNamen}</div></div>
         ${me.fuehrerschein ? `<div><div class="muted" style="font-size:0.72rem">Führerschein</div><div class="bold">${me.fuehrerschein}</div></div>` : ''}
       </div>
       <hr>
@@ -2730,13 +2733,15 @@ registerPage('kamerad-detail', async (el, {id}) => {
   const [aSnap, qSnap, ortSnap, planSnap] = await Promise.all([
     fw.getDocs('anwesenheiten', fw.where('userId','==',id)),
     fw.getDocs('users/'+id+'/qualifikationen'),
-    u.ortswehrId ? fw.getDoc('ortswehren/'+u.ortswehrId) : Promise.resolve(null),
+    fw.getDocs('ortswehren'),
     fw.getDocs('lehrgangsplanung', fw.where('userId','==',id)),
   ]);
   const stats    = getStats(aSnap.docs.map(d => d.data()));
   const qualis   = qSnap.docs.map(d => ({id:d.id,...d.data()}));
   const planung  = planSnap.docs.map(d => ({id:d.id,...d.data()}));
-  const wehrName = ortSnap?.exists?.() ? ortSnap.data().name : '–';
+  const owMap2 = new Map(ortSnap.docs.map(d => [d.id, d.data().name]));
+  const uWehrIds = u.ortswehrIds?.length ? u.ortswehrIds : (u.ortswehrId ? [u.ortswehrId] : []);
+  const wehrName = uWehrIds.map(id => owMap2.get(id)).filter(Boolean).join(', ') || '–';
 
   // Geplante Lehrgänge die noch nicht in qualis sind
   const vorhandeneBezeichnungen = new Set(qualis.map(q => (q.bezeichnung||'').toLowerCase()));

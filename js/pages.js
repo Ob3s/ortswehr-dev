@@ -3251,7 +3251,6 @@ async function ladePruefaufgabenInline() {
   const fahrzeuge = fahrzeugSnap.docs
     .map(d => ({id:d.id,...d.data()}))
     .filter(f => istWF || !f.ortswehrId || meineWehrIdsFz.includes(f.ortswehrId));
-    .filter(f => istWF || !f.ortswehrId || meineWehrIdsFz.includes(f.ortswehrId));
 
   // Alle Prüfaufgaben laden
   const aufgabenSnap = await fw.getDocs('pruefaufgaben', fw.orderBy('bezeichnung','asc'));

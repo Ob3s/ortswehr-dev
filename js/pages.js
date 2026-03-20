@@ -478,7 +478,11 @@ window.zeigeStatusDetail = () => {
             <div style="font-size:0.75rem;color:var(--muted)">${s.info}</div>
           </div>
         </div>`).join('')}
-      <button onclick="document.getElementById('status-modal').remove()" style="margin-top:1rem;width:100%;padding:0.6rem;background:var(--panel2);border:none;border-radius:8px;color:var(--text);cursor:pointer;font-size:0.9rem">Schließen</button>
+      ${_statusDetails.some(s => s.label === 'Push-Token' && !s.ok) ? `
+        <button onclick="tokenErneuern(this)" style="margin-top:0.8rem;width:100%;padding:0.5rem;background:var(--red);border:none;border-radius:8px;color:#fff;cursor:pointer;font-size:0.88rem;font-weight:600">
+          Token erneuern
+        </button>` : ''}
+      <button onclick="document.getElementById('status-modal').remove()" style="margin-top:0.5rem;width:100%;padding:0.6rem;background:var(--panel2);border:none;border-radius:8px;color:var(--text);cursor:pointer;font-size:0.9rem">Schließen</button>
     </div>`;
   document.body.appendChild(modal);
 };
@@ -576,6 +580,44 @@ async function pruefeStatus() {
     // Lampe grau lassen bei Fehler
   }
 }
+
+window.tokenErneuern = async (btn) => {
+  btn.disabled = true;
+  btn.textContent = '⏳ Wird erneuert…';
+  try {
+    const istNativeApp = typeof window.AppInfo !== 'undefined';
+    if (istNativeApp) {
+      // Native: Token über FCM anfordern – App neu starten ist der zuverlässigste Weg
+      // Aber wir können versuchen den Token aus der Bridge zu holen
+      if (window.AlarmSettings?.getFcmToken) {
+        const token = window.AlarmSettings.getFcmToken();
+        if (token) {
+          await fw.setDoc('users/'+fw.user.uid, { fcmToken: token });
+          fw.toast('Token gespeichert ✅');
+          document.getElementById('status-modal')?.remove();
+          await pruefeStatus();
+          return;
+        }
+      }
+      fw.toast('Bitte App neu starten um Token zu erneuern', true);
+    } else {
+      // PWA: Token über Messaging API holen
+      const swReg = await navigator.serviceWorker.getRegistration('/firebase-messaging-sw.js');
+      if (!swReg) throw new Error('Service Worker nicht registriert');
+      const { getToken } = await import('https://www.gstatic.com/firebasejs/10.8.0/firebase-messaging.js');
+      const token = await getToken(fw.messaging, { vapidKey: fw._vapid, serviceWorkerRegistration: swReg });
+      if (!token) throw new Error('Kein Token erhalten – Benachrichtigungen erlaubt?');
+      await fw.setDoc('users/'+fw.user.uid, { fcmToken: token });
+      fw.toast('Token erneuert ✅');
+      document.getElementById('status-modal')?.remove();
+      await pruefeStatus();
+    }
+  } catch(e) {
+    fw.toast('Fehler: ' + e.message, true);
+    btn.disabled = false;
+    btn.textContent = 'Token erneuern';
+  }
+};
 
 function startStatusPruefung() {
   pruefeStatus();

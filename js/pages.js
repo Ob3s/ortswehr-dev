@@ -1584,6 +1584,10 @@ window.abmelden = async () => {
   // Alle aktiven Firestore-Listener stoppen
   if (window._einsatzListener)  { window._einsatzListener();  window._einsatzListener  = null; }
   if (_newsFeedListener)        { _newsFeedListener();         _newsFeedListener        = null; }
+  // FCM Token aus Firestore löschen – Token ist gerätebezogen, nicht nutzerbezogen
+  try {
+    if (fw.user?.uid) await fw.setDoc('users/'+fw.user.uid, { fcmToken: null });
+  } catch(e) { console.warn('Token-Löschung fehlgeschlagen:', e.message); }
   // Gespeicherte Credentials löschen damit Auto-Login nicht greift
   if (typeof window.CredentialStore !== 'undefined') window.CredentialStore.clear();
   const { signOut } = await import('https://www.gstatic.com/firebasejs/10.8.0/firebase-auth.js');
@@ -2522,6 +2526,26 @@ registerPage('news-form', async (el) => {
       }
     }
     await fw.addDoc('news', data);
+
+    // Push-Benachrichtigung direkt versenden (wie Alarm-Push)
+    try {
+      const usersSnap = await fw.getDocs('users');
+      const tokens = usersSnap.docs
+        .filter(d => {
+          const u = d.data();
+          if (!u.fcmToken) return false;
+          if (u.notif_news === false) return false;
+          if (!newsWehrIds.length) return true;
+          const uIds = Array.isArray(u.ortswehrIds) ? u.ortswehrIds : (u.ortswehrId ? [u.ortswehrId] : []);
+          return uIds.some(id => newsWehrIds.includes(id));
+        })
+        .map(d => d.data().fcmToken);
+      if (tokens.length) {
+        const body = inhalt.length > 100 ? inhalt.slice(0, 97) + '…' : inhalt;
+        await sendPush(tokens, `📰 ${titel}`, body, false, '');
+      }
+    } catch(e) { console.warn('News-Push Fehler:', e.message); }
+
     fw.toast('Veröffentlicht ✅');
     navigate('dashboard');
   };

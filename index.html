@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
   <meta name="theme-color" content="#cc2200">
-  <meta name="app-version" content="20260320103446">
+  <meta name="app-version" content="20260320104204">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <meta name="apple-mobile-web-app-title" content="Ortswehr">
@@ -38,8 +38,8 @@
       <a href="#" id="pw-reset-link" style="color:var(--red);font-size:0.82rem;text-decoration:none">Passwort vergessen?</a>
     </p>
     <div id="pw-reset-box" style="display:none;margin-top:0.8rem">
-      <input id="reset-email" type="text" placeholder="Anmeldename" autocapitalize="none">
-      <button type="button" class="btn btn-primary btn-full" id="reset-btn" style="margin-top:0.5rem">Reset-Mail senden</button>
+      <input id="reset-email" type="text" placeholder="Anmeldename" autocapitalize="none" autocomplete="off">
+      <button type="button" class="btn btn-primary btn-full" id="reset-btn" style="margin-top:0.5rem">Wehrführer informieren</button>
       <p id="reset-msg" style="font-size:0.82rem;margin-top:0.5rem;text-align:center"></p>
     </div>
     <p id="login-version" style="text-align:center;font-size:0.7rem;color:#374151;margin-top:1rem 0 0"></p>
@@ -270,13 +270,32 @@
     box.style.display = box.style.display === 'none' ? 'block' : 'none';
   });
   document.getElementById('reset-btn').addEventListener('click', async () => {
-    const email = document.getElementById('reset-email').value.trim();
-    const msg   = document.getElementById('reset-msg');
-    if (!email) { msg.textContent='Bitte E-Mail eingeben'; msg.style.color='var(--red)'; return; }
+    const loginName = document.getElementById('reset-email').value.trim().toLowerCase();
+    const msg = document.getElementById('reset-msg');
+    if (!loginName) { msg.textContent = 'Bitte Anmeldename eingeben'; msg.style.color = 'var(--red)'; return; }
     try {
-      await sendPasswordResetEmail(auth, email);
-      msg.textContent = '✅ Reset-Mail gesendet!'; msg.style.color = 'var(--success)';
-    } catch(e) { msg.textContent = 'E-Mail nicht gefunden'; msg.style.color = 'var(--red)'; }
+      // User mit diesem loginName suchen
+      const { getDocs, collection, query, where, addDoc, serverTimestamp } = await import('https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js');
+      const q = query(collection(db, 'users'), where('loginName', '==', loginName));
+      const snap = await getDocs(q);
+      if (snap.empty) { msg.textContent = 'Anmeldename nicht gefunden'; msg.style.color = 'var(--red)'; return; }
+      const userId = snap.docs[0].id;
+      const userName = (snap.docs[0].data().vorname||'') + ' ' + (snap.docs[0].data().nachname||'');
+      // Anfrage in Firestore speichern
+      await addDoc(collection(db, 'pw_reset_requests'), {
+        userId,
+        loginName,
+        userName: userName.trim(),
+        erstellt: serverTimestamp(),
+        erledigt: false,
+      });
+      msg.textContent = '✅ Wehrführer wurde informiert.';
+      msg.style.color = 'var(--success)';
+      document.getElementById('reset-btn').disabled = true;
+    } catch(e) {
+      msg.textContent = 'Fehler: ' + e.message;
+      msg.style.color = 'var(--red)';
+    }
   });
 
   // Auth State

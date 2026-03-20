@@ -1,1 +1,1 @@
-[{"version": "20260320083343", "datum": "20.03.2026", "punkte": ["NEU: Wehrf\u00fchrer-Aufgaben \u2013 nicht bestandene Pr\u00fcfungen + Kommentare erscheinen im Dashboard", "NEU: Wehrf\u00fchrer-Aufgaben \u2013 einzelne Aufgaben ausblendbar (\ud83d\ude48)", "Fix: \ud83d\ude48 aus Ger\u00e4tepr\u00fcfungen entfernt"]}]
+[{"version": "20260320084134", "datum": "20.03.2026", "punkte": ["Fix: Firestore-Fehler bei Ger\u00e4tepr\u00fcfungen (ung\u00fcltige ID)", "Fix: Ausblenden/Einblenden als Text statt Symbol"]}]

@@ -1,1 +1,1 @@
-[{"version": "20260320112635", "datum": "20.03.2026", "punkte": ["Fix: Token erneuern \u2013 korrekter Service Worker Pfad"]}]
+[{"version": "20260320120359", "datum": "20.03.2026", "punkte": ["Fix: FCM Token wird beim Abmelden gel\u00f6scht \u2013 verhindert Token-\u00dcberschneidung zwischen Nutzern"]}]

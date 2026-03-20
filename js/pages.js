@@ -2408,7 +2408,7 @@ registerPage('kameraden', async (el) => {
       .filter(p => p.id !== 'allgemeine-notiz' && !p.ausgeblendet && (p.bestanden === false || p.kommentar));
     for (const p of pruefIssues) {
       if (p.bestanden === false) {
-        aufgaben.push({ typ: 'pruef-fail', text: `Geräteprüfung nicht bestanden: ${p.bezeichnung}`, pruefId: p.id });
+        aufgaben.push({ typ: 'pruef-fail', text: `${p.bezeichnung}`, pruefId: p.id });
       } else if (p.kommentar) {
         aufgaben.push({ typ: 'pruef-kommentar', text: `Prüfung Kommentar: ${p.bezeichnung} – ${p.kommentar}`, pruefId: p.id });
       }
@@ -3017,12 +3017,16 @@ async function ladePruefaufgabenInline() {
   const dashHtml = istWF && offene.length ? `
     <div class="card" style="border-left:3px solid #ef4444;margin-bottom:0.5rem">
       <div style="font-weight:600;font-size:0.88rem;color:#ef4444;margin-bottom:0.4rem">⚠️ ${offene.length} Aufgabe${offene.length!==1?'n':''} mit Handlungsbedarf</div>
-      ${offene.map(a => `<div style="font-size:0.82rem;padding:0.2rem 0;border-bottom:1px solid var(--border)">${a.bezeichnung}${a.bestanden===false?' · <span style="color:#ef4444">nicht bestanden</span>':''}${a.kommentar?' · 💬 '+a.kommentar:''}</div>`).join('')}
+      ${offene.map(a => `<div style="display:flex;align-items:center;gap:0.4rem;font-size:0.82rem;padding:0.2rem 0;border-bottom:1px solid var(--border)"><span style="flex:1">${a.bezeichnung}${a.kommentar?' · '+a.kommentar:''}</span><button onclick="pruefKommentar('${a.id}')" style="background:none;border:none;color:#9ca3af;cursor:pointer;font-size:0.8rem;padding:0;flex-shrink:0">💬</button></div>`).join('')}
     </div>` : '';
 
   // Freitext-Notiz laden
-  const notizSnap = await fw.getDoc('pruefaufgaben/allgemeine-notiz');
-  const notizText = notizSnap.exists() ? (notizSnap.data().text || '') : '';
+  // Freitext pro Fahrzeug laden
+  const fahrzeugNotizen = {};
+  await Promise.all(fahrzeuge.map(async f => {
+    const s = await fw.getDoc('fahrzeuge/'+f.id+'/meta/notiz').catch(() => null);
+    fahrzeugNotizen[f.id] = s?.exists() ? (s.data().text || '') : '';
+  }));
 
   el.innerHTML = dashHtml + fahrzeuge.map(f => `
     <details style="margin-bottom:0.5rem;border:1px solid var(--border);border-radius:10px">
@@ -3034,18 +3038,19 @@ async function ladePruefaufgabenInline() {
           <span style="color:var(--muted)">▾</span>
         </div>
       </summary>
-      <div style="padding:0 0.8rem 0.8rem">${aufgabenHtml(f.id)}</div>
+      <div style="padding:0 0.8rem 0.8rem">
+        ${aufgabenHtml(f.id)}
+        <div style="margin-top:0.6rem;padding-top:0.4rem;border-top:1px solid var(--border)">
+          <textarea id="notiz-${f.id}" rows="3" style="width:100%;background:var(--panel2);border:1px solid var(--border);border-radius:8px;padding:0.5rem;font-size:0.8rem;color:var(--text);resize:vertical" placeholder="Notizen zu diesem Fahrzeug…">${fahrzeugNotizen[f.id]||''}</textarea>
+          <button class="btn btn-secondary btn-sm" style="margin-top:0.3rem" onclick="fahrzeugNotizSpeichern('${f.id}')">💾 Notiz speichern</button>
+        </div>
+      </div>
     </details>`).join('') +
-    `<div class="card" style="margin-top:0.5rem">
-      <div style="font-size:0.82rem;font-weight:600;color:var(--muted);margin-bottom:0.4rem">Allgemeine Notizen</div>
-      <textarea id="pruef-notiz" rows="4" style="width:100%;background:var(--panel2);border:1px solid var(--border);border-radius:8px;padding:0.6rem;font-size:0.82rem;color:var(--text);resize:vertical">${notizText}</textarea>
-      <button class="btn btn-secondary btn-sm btn-full" style="margin-top:0.4rem" onclick="pruefNotizSpeichern()">💾 Notiz speichern</button>
-    </div>` +
     (istWF ? `<button class="btn btn-secondary btn-sm" style="margin-top:0.5rem" onclick="navigate('fahrzeug-form',{})">+ Fahrzeug hinzufügen</button>` : '');
 
-  window.pruefNotizSpeichern = async () => {
-    const text = document.getElementById('pruef-notiz')?.value || '';
-    await fw.setDoc('pruefaufgaben/allgemeine-notiz', { text });
+  window.fahrzeugNotizSpeichern = async (fzId) => {
+    const text = document.getElementById('notiz-'+fzId)?.value || '';
+    await fw.setDoc('fahrzeuge/'+fzId+'/meta/notiz', { text });
     fw.toast('Notiz gespeichert ✅');
   };
 }

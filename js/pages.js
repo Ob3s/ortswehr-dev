@@ -170,7 +170,8 @@ function dienstSichtbar(d, profil, qualis) {
   if (d.ortswehrIds?.length && profil?.rolle !== 'wehrfuehrer') {
     const meineIds = profil?.ortswehrIds?.length ? profil.ortswehrIds
       : (profil?.ortswehrId ? [profil.ortswehrId] : []);
-    if (meineIds.length && !d.ortswehrIds.some(id => meineIds.includes(id))) return false;
+    // Wenn User keine Wehr zugeordnet: alle sehen
+    if (meineIds.length > 0 && !d.ortswehrIds.some(id => meineIds.includes(id))) return false;
   }
   const titel = (d.titel || '').toLowerCase();
   const qs = (qualis || []).map(q => (q.bezeichnung || q.titel || q.name || '').toLowerCase());
@@ -539,7 +540,7 @@ async function pruefeStatus() {
       _statusDetails.splice(1, 0, {
         label: 'Benachrichtigungen',
         ok: notifOk,
-        info: notifOk ? 'Erlaubt' : 'Berechtigung verweigert'
+        info: notifOk ? 'Erlaubt' : (istNativeApp ? 'App-Berechtigung prüfen' : `Verweigert (${notifPerm})`)
       });
     }
 
@@ -968,24 +969,24 @@ registerPage('uebung-detail', async (el, {id, typ}) => {
       <div style="margin-top:0.3rem;color:var(--muted);font-size:0.85rem">${datum(u.datum)}${zeitZeile(u) ? ' · '+zeitZeile(u) : ''}${!isEinsatz && u.relevant !== false ? ' · <span style="color:#22c55e;font-weight:600">40h</span>' : ''}</div>
       ${u.beschreibung ? `<p class="muted" style="margin-top:0.4rem;font-size:0.85rem">${u.beschreibung}</p>` : ''}
       ${u.ortswehrIds?.length > 1 ? `<div style="margin-top:0.4rem;font-size:0.78rem;color:var(--muted)">Beteiligte Wehren: ${u.ortswehrIds.map(id => owMap.get(id)||id).join(', ')}</div>` : ''}
-      ${u.ort ? `<div style="margin-top:0.5rem;display:flex;align-items:center;gap:0.5rem;flex-wrap:wrap">
+      <div id="ort-anzeige">${u.ort ? `<div style="margin-top:0.5rem;display:flex;align-items:center;gap:0.5rem;flex-wrap:wrap">
         <span style="font-size:0.85rem">📍 ${u.ort}</span>
         ${isEinsatz ? `<a href="https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(u.ort)}" target="_blank"
           style="font-size:0.75rem;padding:0.2rem 0.6rem;background:var(--panel2);border-radius:20px;color:var(--blue);text-decoration:none;border:1px solid var(--border)">
           🗺 Navigation
         </a>` : ''}
-      </div>` : ''}
+      </div>` : ''}</div>
       ${isEinsatz && !u.zeitEnde && fw.isWehrfuehrer() ? `
         <button class="btn btn-secondary btn-sm" style="margin-top:0.6rem" onclick="navigate('uebung-form',{id:'${u.id}',typ:'einsatz'})">⏱ Endzeit nachtragen</button>
       ` : ''}
-      ${isEinsatz && !u.ort && fw.isWehrfuehrer() ? `
-        <div class="ac-wrapper" style="display:flex;gap:0.5rem;margin-top:0.6rem;align-items:center;position:relative">
+      ${isEinsatz && !u.ort ? `
+        <div id="ort-inline-wrapper" class="ac-wrapper" style="display:flex;gap:0.5rem;margin-top:0.6rem;align-items:center;position:relative">
           <input id="ort-inline" placeholder="Adresse eintragen…" style="flex:1;font-size:0.85rem">
           <button class="btn btn-secondary btn-sm" onclick="ortSpeichern('${u.id}')">📍 Speichern</button>
         </div>
       ` : ''}
     </div>
-    <div style="height:0.5rem"></div>
+    <div class="section-header" style="margin-top:0.8rem"></div>
     <div id="einsatz-reaktionen" class="card">⏳ Lade...</div>
     <div class="card" style="display:flex;gap:0.8rem">
       <button class="btn btn-full" id="btn-kommt"
@@ -3240,10 +3241,11 @@ async function ladePruefaufgabenInline() {
   const ortswehrId = fw.profil?.ortswehrIds?.[0] || fw.profil?.ortswehrId || null;
 
   // Fahrzeuge laden – WF sieht alle, Maschinist nur eigene Ortswehr
-  const fahrzeugSnap = istWF
-    ? await fw.getDocs('fahrzeuge', fw.orderBy('name','asc'))
-    : await fw.getDocs('fahrzeuge', fw.where('ortswehrId','==',ortswehrId), fw.orderBy('name','asc'));
-  const fahrzeuge = fahrzeugSnap.docs.map(d => ({id:d.id,...d.data()}));
+  const fahrzeugSnap = await fw.getDocs('fahrzeuge', fw.orderBy('name','asc'));
+  const meineWehrIdsFz = fw.profil.ortswehrIds?.length ? fw.profil.ortswehrIds : (fw.profil.ortswehrId ? [fw.profil.ortswehrId] : []);
+  const fahrzeuge = fahrzeugSnap.docs
+    .map(d => ({id:d.id,...d.data()}))
+    .filter(f => istWF || !f.ortswehrId || meineWehrIdsFz.includes(f.ortswehrId));
 
   // Alle Prüfaufgaben laden
   const aufgabenSnap = await fw.getDocs('pruefaufgaben', fw.orderBy('bezeichnung','asc'));
@@ -3269,8 +3271,14 @@ async function ladePruefaufgabenInline() {
       return 'Zuletzt: ' + d.toLocaleDateString('de-DE');
     }
     const letztes = a.letztesPruefDatum.toDate ? a.letztesPruefDatum.toDate() : new Date(a.letztesPruefDatum);
-    const naechstes = new Date(letztes); naechstes.setMonth(naechstes.getMonth() + a.intervall);
-    return 'Nächste: ' + naechstes.toLocaleDateString('de-DE');
+    const naechstes = new Date(letztes);
+    naechstes.setDate(1); // Overflow vermeiden
+    naechstes.setMonth(naechstes.getMonth() + a.intervall);
+    // Auf letzten Tag des Monats setzen wenn nötig
+    const maxTag = new Date(naechstes.getFullYear(), naechstes.getMonth()+1, 0).getDate();
+    naechstes.setDate(Math.min(letztes.getDate(), maxTag));
+    const istUeberfaellig = naechstes < heute;
+    return (istUeberfaellig ? '⚠️ Nächste: ' : 'Nächste: ') + naechstes.toLocaleDateString('de-DE');
   }
 
   function aufgabenHtml(fahrzeugId) {
@@ -3307,7 +3315,7 @@ async function ladePruefaufgabenInline() {
 
   // Dashboard-Hinweis: nicht bestandene oder kommentierte Aufgaben
   const offene = alleAufgaben.filter(a => !a.ausgeblendet && (a.bestanden === false || a.kommentar));
-  const dashHtml = istWF && offene.length ? `
+  const dashHtml = (istWF || istMaschinist) && offene.length ? `
     <div class="card" style="border-left:3px solid #ef4444;margin-bottom:0.5rem">
       <div style="font-weight:600;font-size:0.88rem;color:#ef4444;margin-bottom:0.4rem">⚠️ ${offene.length} Aufgabe${offene.length!==1?'n':''} mit Handlungsbedarf</div>
       ${offene.map(a => `<div style="font-size:0.82rem;padding:0.3rem 0;border-bottom:1px solid var(--border)"><div style="display:flex;align-items:center;gap:0.4rem"><span style="flex:1;font-weight:600">${a.bezeichnung}</span><button onclick="pruefKommentar('${a.id}')" style="background:none;border:none;color:#9ca3af;cursor:pointer;font-size:0.8rem;padding:0;flex-shrink:0">💬</button></div>${a.kommentar?`<div style="font-size:0.75rem;color:var(--muted);margin-top:0.1rem">${a.kommentar}</div>`:''}</div>`).join('')}

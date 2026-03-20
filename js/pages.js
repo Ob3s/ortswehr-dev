@@ -55,8 +55,8 @@ function getStats(anwesenheiten, dienstMap, einsatzMap) {
   const jahrAkt = jetzt.getFullYear();
   const vor12m  = new Date(); vor12m.setFullYear(jetzt.getFullYear()-1); vor12m.setHours(0,0,0,0);
 
-  let gesamtEinsatz=0, gesamtDienst=0, einsaetze=0, dienste=0;
-  let dienstStundenJahr=0, dienstStunden12m=0;
+  let gesamtEinsatz=0, dienstRelevant=0, dienstIrrelevant=0, einsaetze=0, dienste=0;
+  let dienstStunden12m=0;
   for (const a of anwesenheiten) {
     if (a.status !== 'bestaetigt' && a.status !== 'kommt') continue;
     const dienstEintrag  = dienstMap?.get(a.uebungId)  || null;
@@ -66,21 +66,30 @@ function getStats(anwesenheiten, dienstMap, einsatzMap) {
     const istEinsatz = typNorm === 'einsatz' || (!a.typ && !!einsatzEintrag && !dienstEintrag);
     const h = eintrag?.dauer_h ?? a.dauer_h ?? 0;
     const d = a.datum?.toDate ? a.datum.toDate() : (eintrag?.datum?.toDate?.()  || new Date(a.datum));
+    // relevant: default true, explizit false nur wenn gesetzt
+    const istRelevant = eintrag?.relevant !== false;
 
     if (istEinsatz) {
       if (d.getFullYear() === jahrAkt) { gesamtEinsatz += h; einsaetze++; }
     } else {
-      if (d.getFullYear() === jahrAkt) { gesamtDienst += h; dienste++; dienstStundenJahr += h; }
-      if (d >= vor12m) { dienstStunden12m += h; }
+      if (d.getFullYear() === jahrAkt) {
+        dienste++;
+        if (istRelevant) dienstRelevant += h;
+        else             dienstIrrelevant += h;
+      }
+      if (d >= vor12m && istRelevant) dienstStunden12m += h;
     }
   }
+  const gesamtDienst = dienstRelevant + dienstIrrelevant;
   return {
-    gesamtEinsatz:  Math.round(gesamtEinsatz*10)/10,
-    gesamtDienst:   Math.round(gesamtDienst*10)/10,
+    gesamtEinsatz:    Math.round(gesamtEinsatz*10)/10,
+    gesamtDienst:     Math.round(gesamtDienst*10)/10,
+    dienstRelevant:   Math.round(dienstRelevant*10)/10,
+    dienstIrrelevant: Math.round(dienstIrrelevant*10)/10,
     einsaetze, dienste,
-    stunden12m: Math.round(dienstStundenJahr*10)/10,  // Anzeige: aktuelles Jahr
-    ziel: dienstStunden12m >= 40,                      // 40h-Ziel: letzte 12 Monate
-    stunden12mZiel: Math.round(dienstStunden12m*10)/10,
+    stunden12m:       Math.round(dienstRelevant*10)/10,  // aktuelles Jahr, nur relevante
+    ziel:             dienstStunden12m >= 40,
+    stunden12mZiel:   Math.round(dienstStunden12m*10)/10,
   };
 }
 
@@ -1134,6 +1143,11 @@ registerPage('uebung-form', async (el, {id, typ: vorTyp, alarm: mitAlarm}) => {
         <div class="form-row"><label>Ort (optional)</label>
           <input id="f-ort" value="${u?.ort||''}" placeholder="Gerätehaus Oegeln">
         </div>
+        ${fw.isWehrfuehrer() ? `
+        <div style="display:flex;align-items:center;gap:0.6rem;padding:0.4rem 0;border-top:1px solid var(--border);margin-top:0.2rem">
+          <input type="checkbox" id="f-relevant" style="width:1.2rem;height:1.2rem;accent-color:var(--red)" ${u?.relevant===false?'':'checked'}>
+          <label for="f-relevant" style="font-size:0.88rem;cursor:pointer">Zählt für 40-Stunden-Ziel</label>
+        </div>` : ''}
         <div class="btn-row">
           <button class="btn btn-primary" onclick="uebungSpeichern('${id||''}','dienst')">💾 Speichern & Benachrichtigen</button>
           ${u ? `<button class="btn btn-danger" onclick="uebungLoeschen('${id}','dienst')">🗑 Löschen</button>` : ''}
@@ -1174,7 +1188,9 @@ window.uebungSpeichern = async (id, forcTyp) => {
   if (!titel) { fw.toast('Stichwort erforderlich', true); return; }
 
   const ort = document.getElementById('f-ort')?.value?.trim() || null;
-  const data = { titel, datum: new Date(datumStr), typ, dauer_h, beschreibung: beschr, zeitBeginn, zeitEnde, ort };
+  const relevantEl = document.getElementById('f-relevant');
+  const relevant = isEinsatz ? true : (relevantEl ? relevantEl.checked : true);
+  const data = { titel, datum: new Date(datumStr), typ, dauer_h, beschreibung: beschr, zeitBeginn, zeitEnde, ort, relevant };
   const isNeu = !id;
   try {
     let uebungId = id;
@@ -1325,8 +1341,8 @@ registerPage('profil', async (el) => {
       </div>
     </div>
     <div class="stats-grid">
-      <div class="stat-card"><div class="stat-zahl">${dauerFormat(stats.gesamtDienst)}h</div><div class="stat-label">Dienststunden ${new Date().getFullYear()}</div></div>
-      <div class="stat-card"><div class="stat-zahl">${stats.dienste}</div><div class="stat-label">${stats.dienste===1?'Dienst':'Dienste'} ${new Date().getFullYear()}</div></div>
+      <div class="stat-card"><div class="stat-zahl">${dauerFormat(stats.dienstRelevant)}h</div><div class="stat-label">Dienste (relevant) ${new Date().getFullYear()}</div></div>
+      <div class="stat-card"><div class="stat-zahl">${dauerFormat(stats.dienstIrrelevant)}h</div><div class="stat-label">Dienste (nicht relevant) ${new Date().getFullYear()}</div></div>
       <div class="stat-card"><div class="stat-zahl">${dauerFormat(stats.gesamtEinsatz)}h</div><div class="stat-label">Einsatzstunden ${new Date().getFullYear()}</div></div>
       <div class="stat-card"><div class="stat-zahl">${stats.einsaetze}</div><div class="stat-label">${stats.einsaetze===1?'Einsatz':'Einsätze'} ${new Date().getFullYear()}</div></div>
     </div>
@@ -2674,8 +2690,8 @@ registerPage('kamerad-detail', async (el, {id}) => {
       </div>
     </div>
     <div class="stats-grid">
-      <div class="stat-card"><div class="stat-zahl">${dauerFormat(stats.gesamtDienst)}h</div><div class="stat-label">Dienststunden ${new Date().getFullYear()}</div></div>
-      <div class="stat-card"><div class="stat-zahl">${stats.dienste}</div><div class="stat-label">${stats.dienste===1?'Dienst':'Dienste'} ${new Date().getFullYear()}</div></div>
+      <div class="stat-card"><div class="stat-zahl">${dauerFormat(stats.dienstRelevant)}h</div><div class="stat-label">Dienste (relevant) ${new Date().getFullYear()}</div></div>
+      <div class="stat-card"><div class="stat-zahl">${dauerFormat(stats.dienstIrrelevant)}h</div><div class="stat-label">Dienste (nicht relevant) ${new Date().getFullYear()}</div></div>
       <div class="stat-card"><div class="stat-zahl">${dauerFormat(stats.gesamtEinsatz)}h</div><div class="stat-label">Einsatzstunden ${new Date().getFullYear()}</div></div>
       <div class="stat-card"><div class="stat-zahl">${stats.einsaetze}</div><div class="stat-label">${stats.einsaetze===1?'Einsatz':'Einsätze'} ${new Date().getFullYear()}</div></div>
     </div>

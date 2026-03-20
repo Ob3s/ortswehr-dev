@@ -502,66 +502,64 @@ async function pruefeStatus() {
     const online = navigator.onLine;
     const istNativeApp = typeof AppInfo !== 'undefined';
 
-    // Benachrichtigungen: In nativer App immer OK wenn Token vorhanden
-    // (WebView meldet permission oft falsch)
-    const notifPerm = typeof Notification !== 'undefined' ? Notification.permission : 'denied';
-    const notifOk   = istNativeApp ? true : notifPerm === 'granted';
+    // 1. Benachrichtigungen
+    let notifOk = false, notifInfo = '';
+    if (istNativeApp) {
+      // Native: prüfe ob FCM-Bridge vorhanden ist
+      notifOk = typeof window.AlarmSettings !== 'undefined';
+      notifInfo = notifOk ? 'App-Benachrichtigungen aktiv' : 'AlarmSettings Bridge fehlt';
+    } else {
+      const notifPerm = typeof Notification !== 'undefined' ? Notification.permission : 'default';
+      notifOk = notifPerm === 'granted';
+      notifInfo = notifOk ? 'Erlaubt' : notifPerm === 'denied' ? 'Verweigert – in Browser-Einstellungen aktivieren' : 'Noch nicht erlaubt';
+    }
 
-    // Token aus Firestore
-    const snap    = await fw.getDoc('users/' + fw.user.uid);
-    const tokenOk = !!(snap.data()?.fcmToken);
+    // 2. Token
+    const snap = await fw.getDoc('users/' + fw.user.uid);
+    const gespeicherterToken = snap.data()?.fcmToken || null;
+    let tokenOk = !!gespeicherterToken;
+    let tokenInfo = tokenOk ? 'Vorhanden ✓' : 'Fehlt – bitte erneuern';
 
-    let tokenFrisch = tokenOk;
-    let tokenInfo   = tokenOk ? 'Token vorhanden ✓' : 'Kein Token gespeichert';
-
-    if (!istNativeApp && online && notifOk && tokenOk && fw.messaging) {
-      // PWA: Web-Push Token prüfen
+    if (!istNativeApp && online && notifOk && fw.messaging) {
       try {
-        const swReg = await navigator.serviceWorker.getRegistration('/firebase-messaging-sw.js');
+        const swReg = await navigator.serviceWorker.getRegistration('/ortswehr/sw.js')
+          || await navigator.serviceWorker.ready;
         if (swReg) {
           const { getToken } = await import('https://www.gstatic.com/firebasejs/10.8.0/firebase-messaging.js');
           const aktuellerToken = await getToken(fw.messaging, { vapidKey: fw._vapid, serviceWorkerRegistration: swReg });
-          if (aktuellerToken && aktuellerToken !== snap.data()?.fcmToken) {
+          if (aktuellerToken && aktuellerToken !== gespeicherterToken) {
             await fw.setDoc('users/' + fw.user.uid, { fcmToken: aktuellerToken });
             if (fw.profil) fw.profil.fcmToken = aktuellerToken;
-            tokenInfo = 'Token erneuert ✓';
+            tokenInfo = 'Erneuert ✓';
           } else if (aktuellerToken) {
-            tokenInfo = 'Token gültig ✓';
+            tokenInfo = 'Gültig ✓';
           }
-          tokenFrisch = !!aktuellerToken;
+          tokenOk = !!aktuellerToken;
         }
-      } catch(e) { tokenInfo = 'Token-Prüfung fehlgeschlagen: ' + e.message; }
+      } catch(e) { tokenInfo = 'Prüfung fehlgeschlagen: ' + e.message; }
     }
 
-    const allesOk = online && notifOk && tokenFrisch;
-    const grund   = !online ? 'Kein Internet' : !tokenFrisch ? 'Kein Push-Token' : 'Problem erkannt';
-
-    // Detail-Status für Modal
-    _statusDetails = [
-      { label: 'Internetverbindung', ok: online,      info: online      ? 'Verbunden'         : 'Nicht verbunden' },
-      { label: 'Push-Token',         ok: tokenFrisch, info: tokenInfo },
-    ];
-    if (!istNativeApp) {
-      _statusDetails.splice(1, 0, {
-        label: 'Benachrichtigungen',
-        ok: notifOk,
-        info: notifOk ? 'Erlaubt' : (istNativeApp ? 'App-Berechtigung prüfen' : `Verweigert (${notifPerm})`)
-      });
-    }
-
-    // Native App: Akkuoptimierung prüfen
+    // 3. Akkuoptimierung (native)
+    let akkuOk = true, akkuInfo = 'Nicht relevant (PWA)';
     if (istNativeApp) {
-      let akkuOk = true;
       try {
         const pm = window.PowerManager;
         akkuOk = pm ? pm.isIgnoringBatteryOptimizations() : true;
-      } catch(e) {}
-      _statusDetails.push({
-        label: 'Akkuoptimierung',
-        ok: akkuOk,
-        info: akkuOk ? 'Deaktiviert ✓' : 'Aktiv – kann Alarme verzögern'
-      });
+        akkuInfo = akkuOk ? 'Deaktiviert ✓' : 'Aktiv – Alarme können verzögert werden!';
+      } catch(e) { akkuInfo = 'Unbekannt'; }
     }
+
+    const allesOk = online && notifOk && tokenOk && (istNativeApp ? akkuOk : true);
+    const grund = !online ? 'Kein Internet' : !notifOk ? 'Benachrichtigungen gesperrt' : !tokenOk ? 'Kein Push-Token' : 'Akkuoptimierung aktiv';
+
+    // Alle 4 Punkte immer anzeigen
+    _statusDetails = [
+      { label: 'Internet',            ok: online,   info: online ? 'Verbunden' : 'Nicht verbunden' },
+      { label: 'Benachrichtigungen',  ok: notifOk,  info: notifInfo },
+      { label: 'Push-Token',          ok: tokenOk,  info: tokenInfo },
+      { label: 'Akkuoptimierung',     ok: istNativeApp ? akkuOk : true,
+        info: istNativeApp ? akkuInfo : 'Nicht relevant (PWA)' },
+    ];
 
     lampe.style.background = allesOk ? '#22c55e' : '#ef4444';
     lampe.style.boxShadow  = `0 0 6px ${allesOk ? '#22c55e' : '#ef4444'}`;
@@ -3408,10 +3406,12 @@ async function ladePruefaufgabenInline() {
 window.pruefBestanden = async (id, bestanden) => {
   const label = bestanden ? 'Bestanden' : 'Nicht bestanden';
   if (!confirm(`Aufgabe als "${label}" markieren?`)) return;
-  await fw.setDoc('pruefaufgaben/'+id, {
-    letztesPruefDatum: new Date(),
-    bestanden,
-  });
+  const data = { letztesPruefDatum: new Date(), bestanden };
+  if (bestanden) {
+    // Bestanden: Handlungsbedarf + Kommentar löschen
+    data.kommentar = null;
+  }
+  await fw.setDoc('pruefaufgaben/'+id, data);
   fw.toast(bestanden ? 'Als bestanden markiert ✅' : 'Als nicht bestanden markiert ❌');
   ladePruefaufgabenInline();
 };

@@ -175,7 +175,7 @@ function dienstSichtbar(d, profil, qualis) {
   const titel = (d.titel || '').toLowerCase();
   const qs = (qualis || []).map(q => (q.bezeichnung || q.titel || q.name || '').toLowerCase());
   // AGT-Termine
-  const agtTitel = ['belastungslauf', 'wärmeübung', 'fortbildungstag agt'];
+  const agtTitel = (_dienstFilter?.agt || ['belastungslauf', 'wärmeübung', 'fortbildungstag agt']);
   if (agtTitel.some(t => titel.includes(t))) {
     return qs.some(q => q.includes('agt'));
   }
@@ -184,7 +184,7 @@ function dienstSichtbar(d, profil, qualis) {
     return qs.some(q => q.includes('maschinist'));
   }
   // Führungskräfte
-  const fuehTitel = ['führungskräfte', 'gruppenführersitzung', 'zugführersitzung', 'zug- und gruppenführer'];
+  const fuehTitel = (_dienstFilter?.fuehrung || ['führungskräfte', 'gruppenführersitzung', 'zugführersitzung', 'zug- und gruppenführer']);
   if (fuehTitel.some(t => titel.includes(t))) {
     const rolle = profil?.rolle || '';
     return ['gruppenführer','zugführer','wehrfuehrer'].includes(rolle);
@@ -754,6 +754,7 @@ registerPage('einsaetze', async (el) => {
 // ── Dienste ───────────────────────────────────────────────
 registerPage('dienste', async (el) => {
   fw.setTitle('Dienste');
+  await ladeDienstFilter();
   if (fw.isWehrfuehrer()) fw.showHeaderAction('+ Dienst', () => navigate('uebung-form', {typ:'dienst'}));
   const [uSnap, aSnap, dQualiSnap] = await Promise.all([
     fw.getDocs('dienste', fw.orderBy('datum','desc')),
@@ -1831,6 +1832,36 @@ registerPage('statistik', async (el) => {
 let _lehrgangsarten = []; // [{id, bezeichnung, tage, stunden, wochentag, sortierung}]
 let _lehrgangsartenGeladen = false;
 
+// Dienst-Filter (AGT/Führungskräfte Keywords) aus Firestore
+let _dienstFilter = null;
+async function ladeDienstFilter() {
+  if (_dienstFilter) return _dienstFilter;
+  try {
+    const snap = await fw.getDoc('einstellungen/dienstfilter');
+    if (snap.exists()) {
+      _dienstFilter = snap.data();
+    }
+  } catch(e) {}
+  return _dienstFilter;
+}
+
+// Dienstgrade aus Firestore
+let _dienstgrade = null;
+async function ladeDienstgrade() {
+  if (_dienstgrade) return _dienstgrade;
+  try {
+    const snap = await fw.getDoc('einstellungen/dienstgrade');
+    if (snap.exists()) _dienstgrade = snap.data().liste || [];
+  } catch(e) {}
+  // Fallback: hardcoded
+  if (!_dienstgrade?.length) _dienstgrade = [
+    'Feuerwehrmann-Anwärter','Feuerwehrmann','Oberfeuerwehrmann','Hauptfeuerwehrmann',
+    '1. Hauptfeuerwehrmann','Löschmeister','Oberlöschmeister','Hauptlöschmeister',
+    '1. Hauptlöschmeister','Brandmeister','Oberbrandmeister','Hauptbrandmeister','1. Hauptbrandmeister'
+  ];
+  return _dienstgrade;
+}
+
 async function ladeLehrgangsarten() {
   if (_lehrgangsartenGeladen) return _lehrgangsarten;
   const snap = await fw.getDocs('lehrgangsarten');
@@ -1875,6 +1906,56 @@ function berechneEndDatum(startDatumStr, tage, lehrgang) {
 }
 
 // ── Lehrgangsarten verwalten ──────────────────────────────
+// ── Admin: Dienstgrade & Dienst-Filter ───────────────────
+registerPage('einstellungen-admin', async (el) => {
+  if (!fw.isWehrfuehrer()) { navigate('dashboard'); return; }
+  fw.setTitle('Dienstgrade & Filter');
+  fw.showBack(() => navigateBack());
+
+  const [dgSnap, dfSnap] = await Promise.all([
+    fw.getDoc('einstellungen/dienstgrade'),
+    fw.getDoc('einstellungen/dienstfilter'),
+  ]);
+
+  const dg = dgSnap.exists() ? (dgSnap.data().liste || []) : [];
+  const df = dfSnap.exists() ? dfSnap.data() : { agt: [], fuehrung: [] };
+
+  el.innerHTML = `
+    <div class="card">
+      <div class="card-title">Dienstgrade</div>
+      <p class="muted" style="font-size:0.82rem;margin-bottom:0.5rem">Ein Grad pro Zeile</p>
+      <textarea id="adm-dg" rows="14" style="width:100%;background:var(--panel2);border:1px solid var(--border);border-radius:8px;padding:0.6rem;font-size:0.82rem;color:var(--text);resize:vertical">${dg.join('\n')}</textarea>
+      <button class="btn btn-primary btn-sm btn-full" style="margin-top:0.4rem" onclick="admSaveDG()">💾 Speichern</button>
+    </div>
+    <div class="card">
+      <div class="card-title">AGT-Dienst-Schlüsselwörter</div>
+      <p class="muted" style="font-size:0.82rem;margin-bottom:0.5rem">Dienste mit diesen Stichwörtern sind nur für AGT-Träger sichtbar. Ein Begriff pro Zeile.</p>
+      <textarea id="adm-agt" rows="5" style="width:100%;background:var(--panel2);border:1px solid var(--border);border-radius:8px;padding:0.6rem;font-size:0.82rem;color:var(--text);resize:vertical">${(df.agt||[]).join('\n')}</textarea>
+      <button class="btn btn-primary btn-sm btn-full" style="margin-top:0.4rem" onclick="admSaveFilter()">💾 Speichern</button>
+    </div>
+    <div class="card">
+      <div class="card-title">Führungskräfte-Schlüsselwörter</div>
+      <p class="muted" style="font-size:0.82rem;margin-bottom:0.5rem">Dienste mit diesen Stichwörtern sind nur für Gruppenführer+ sichtbar. Ein Begriff pro Zeile.</p>
+      <textarea id="adm-fuehr" rows="5" style="width:100%;background:var(--panel2);border:1px solid var(--border);border-radius:8px;padding:0.6rem;font-size:0.82rem;color:var(--text);resize:vertical">${(df.fuehrung||[]).join('\n')}</textarea>
+      <button class="btn btn-primary btn-sm btn-full" style="margin-top:0.4rem" onclick="admSaveFilter()">💾 Speichern</button>
+    </div>`;
+
+  window.admSaveDG = async () => {
+    const liste = document.getElementById('adm-dg').value.split('\n').map(s => s.trim()).filter(Boolean);
+    await fw.setDoc('einstellungen/dienstgrade', { liste });
+    _dienstgrade = liste;
+    fw.toast('Dienstgrade gespeichert ✅');
+  };
+
+  window.admSaveFilter = async () => {
+    const agt     = document.getElementById('adm-agt').value.split('\n').map(s => s.trim().toLowerCase()).filter(Boolean);
+    const fuehrung = document.getElementById('adm-fuehr').value.split('\n').map(s => s.trim().toLowerCase()).filter(Boolean);
+    await fw.setDoc('einstellungen/dienstfilter', { agt, fuehrung });
+    _dienstFilter = { agt, fuehrung };
+    fw.toast('Filter gespeichert ✅');
+  };
+});
+
 registerPage('lehrgangsarten-verwalten', async (el) => {
   if (!fw.isWehrfuehrer()) { navigate('dashboard'); return; }
   fw.setTitle('Lehrgangsarten');
@@ -2405,7 +2486,11 @@ registerPage('kameraden', async (el) => {
   fw.setTitle('Kameraden');
   fw.showHeaderAction('+ Neu', () => navigate('kamerad-form', {}));
 
-  const snap = await fw.getDocs('users');
+  const [snap, owSnapKam] = await Promise.all([
+    fw.getDocs('users'),
+    fw.getDocs('ortswehren'),
+  ]);
+  const owMapKam = new Map(owSnapKam.docs.map(d => [d.id, d.data().name]));
   const users = snap.docs.map(d => ({id:d.id,...d.data()}))
     .sort((a,b) => {
       const aAktiv = a.aktiv !== false;
@@ -2578,6 +2663,7 @@ registerPage('kameraden', async (el) => {
   el.innerHTML = `
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:0.6rem;margin-bottom:0.2rem">
       <button class="btn btn-secondary btn-sm btn-full" onclick="navigate('lehrgaenge')">📚 Lehrgänge</button>
+      ${fw.isWehrfuehrer() ? `<button class="btn btn-secondary btn-sm btn-full" onclick="navigate('einstellungen-admin')" style="margin-top:0.3rem">⚙️ Dienstgrade & Filter</button>` : ''}
       <button class="btn btn-secondary btn-sm btn-full" onclick="navigate('statistik')">📊 Statistiken</button>
     </div>
     ${aufgabenHtml}
@@ -2588,6 +2674,7 @@ registerPage('kameraden', async (el) => {
           <div class="list-item-icon" style="${u.aktiv===false?'filter:grayscale(1);opacity:0.4':''}">🧑</div>
           <div class="list-item-body">
             <div class="list-item-title">${u.nachname||''}, ${u.vorname||''}</div>
+            ${u.ortswehrIds?.length || u.ortswehrId ? `<div class="list-item-sub">${(u.ortswehrIds||[u.ortswehrId]).map(id => owMapKam.get(id)).filter(Boolean).join(', ')}</div>` : ''}
           </div>
           ${stundenBadge(u.id)}
           <div class="list-chevron">›</div>
@@ -2872,6 +2959,7 @@ window.agtSpeichern = async (userId) => {
 
 registerPage('kamerad-form', async (el, {id}) => {
   await ladeLehrgangsarten();
+  const dienstgradeLoaded = await ladeDienstgrade();
   let u = null;
   if (id) { const s=await fw.getDoc('users/'+id); if(s.exists()) u={id,...s.data()}; }
   fw.setTitle(u ? 'Bearbeiten' : 'Neuer Kamerad');
@@ -2892,7 +2980,7 @@ registerPage('kamerad-form', async (el, {id}) => {
       <div class="form-row"><label>Vorname</label><input id="k-vn" value="${u?.vorname||''}" ></div>
       <div class="form-row"><label>Nachname</label><input id="k-nn" value="${u?.nachname||''}" ></div>
       ${!u ? `<div class="form-row"><label>Benutzername (Login)</label><input id="k-email" type="text" readonly style="color:var(--muted)" placeholder="wird automatisch generiert"></div>` : ''}
-      <div class="form-row"><label>Dienstgrad</label><select id="k-dg"><option value="">– wählen –</option><option value="Feuerwehrmann-Anwärter" ${u?.dienstgrad==="Feuerwehrmann-Anwärter"?"selected":""}>Feuerwehrmann-Anwärter</option><option value="Feuerwehrmann" ${u?.dienstgrad==="Feuerwehrmann"?"selected":""}>Feuerwehrmann</option><option value="Oberfeuerwehrmann" ${u?.dienstgrad==="Oberfeuerwehrmann"?"selected":""}>Oberfeuerwehrmann</option><option value="Hauptfeuerwehrmann" ${u?.dienstgrad==="Hauptfeuerwehrmann"?"selected":""}>Hauptfeuerwehrmann</option><option value="1. Hauptfeuerwehrmann" ${u?.dienstgrad==="1. Hauptfeuerwehrmann"?"selected":""}>1. Hauptfeuerwehrmann</option><option value="Löschmeister" ${u?.dienstgrad==="Löschmeister"?"selected":""}>Löschmeister</option><option value="Oberlöschmeister" ${u?.dienstgrad==="Oberlöschmeister"?"selected":""}>Oberlöschmeister</option><option value="Hauptlöschmeister" ${u?.dienstgrad==="Hauptlöschmeister"?"selected":""}>Hauptlöschmeister</option><option value="1. Hauptlöschmeister" ${u?.dienstgrad==="1. Hauptlöschmeister"?"selected":""}>1. Hauptlöschmeister</option><option value="Brandmeister" ${u?.dienstgrad==="Brandmeister"?"selected":""}>Brandmeister</option><option value="Oberbrandmeister" ${u?.dienstgrad==="Oberbrandmeister"?"selected":""}>Oberbrandmeister</option><option value="Hauptbrandmeister" ${u?.dienstgrad==="Hauptbrandmeister"?"selected":""}>Hauptbrandmeister</option><option value="1. Hauptbrandmeister" ${u?.dienstgrad==="1. Hauptbrandmeister"?"selected":""}>1. Hauptbrandmeister</option></select></div>
+      <div class="form-row"><label>Dienstgrad</label><select id="k-dg"><option value="">– wählen –</option>${dienstgradeLoaded.map(dg => `<option value="${dg}" ${u?.dienstgrad===dg?'selected':''}>${dg}</option>`).join('')}</select></div>
       <div class="form-row"><label>Eintrittsdatum</label><input id="k-ed" type="date" value="${datumVal}"></div>
       <div class="form-row"><label>Ortswehr(en)</label>
         <div style="display:flex;flex-direction:column;gap:0.3rem;margin-top:0.2rem">

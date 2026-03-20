@@ -1,1 +1,1 @@
-[{"version": "20260320162721", "datum": "20.03.2026", "punkte": ["Fix: Trenner bei Reaktionen wieder sichtbar", "Fix: Adresse-Eintragung aktualisiert DOM sofort ohne Seitenreload", "Fix: Fahrzeuge f\u00fcr Maschinist in mehreren Wehren korrekt gefiltert", "Fix: Handlungsbedarf jetzt auch f\u00fcr Maschinist sichtbar", "Fix: News-Archiv f\u00fcr alle sichtbar", "Fix: Pr\u00fcfungs-Dropdown bleibt offen beim Aktualisieren"]}]
+[{"version": "20260320163615", "datum": "20.03.2026", "punkte": ["Fix: Syntax-Fehler doppelter filter"]}]

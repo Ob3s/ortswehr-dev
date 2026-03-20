@@ -2989,18 +2989,22 @@ async function ladePruefaufgabenInline() {
     if (aufgaben.length === 0) return '<p class="muted" style="font-size:0.82rem;padding:0.3rem 0">Keine Aufgaben</p>';
     return aufgaben.filter(a => !a.ausgeblendet).map(a => `
       <div style="padding:0.5rem 0;border-bottom:1px solid var(--border)">
-        <div style="display:flex;align-items:center;gap:0.6rem">
-          <div style="width:10px;height:10px;border-radius:50%;flex-shrink:0;background:${statusFarbe(a)}"></div>
+        <div style="display:flex;align-items:flex-start;gap:0.6rem">
+          <div style="width:10px;height:10px;border-radius:50%;flex-shrink:0;margin-top:0.3rem;background:${statusFarbe(a)}"></div>
           <div style="flex:1;min-width:0">
             <div style="font-size:0.85rem;font-weight:600">${a.bezeichnung}</div>
             <div style="font-size:0.73rem;color:var(--muted)">${datumsAnzeige(a)}${a.intervall ? ` · alle ${a.intervall} Mon.` : ''}</div>
             ${a.kommentar ? `<div style="font-size:0.73rem;color:var(--muted);margin-top:0.15rem">💬 ${a.kommentar}</div>` : ''}
           </div>
-          <div style="display:flex;gap:0.3rem;flex-shrink:0">
-            <button class="btn btn-sm btn-success" style="font-size:0.7rem;padding:0.2rem 0.45rem" onclick="pruefBestanden('${a.id}',true)" title="Bestanden">✅</button>
-            <button class="btn btn-sm btn-danger" style="font-size:0.7rem;padding:0.2rem 0.45rem" onclick="pruefBestanden('${a.id}',false)" title="Nicht bestanden">❌</button>
-            <button class="btn btn-sm btn-secondary" style="font-size:0.7rem;padding:0.2rem 0.45rem" onclick="pruefKommentar('${a.id}')" title="Kommentar">💬</button>
-            ${istWF ? `<button class="btn btn-sm btn-secondary" style="font-size:0.7rem;padding:0.2rem 0.45rem" onclick="navigate('pruefaufgabe-form',{id:'${a.id}'})">✏️</button>` : ''}
+          <div style="display:flex;flex-direction:column;gap:0.2rem;flex-shrink:0;align-items:flex-end">
+            <div style="display:flex;gap:0.2rem">
+              <button class="btn btn-sm btn-success" style="font-size:0.7rem;padding:0.15rem 0.35rem" onclick="pruefBestanden('${a.id}',true)" title="Bestanden">✅</button>
+              <button class="btn btn-sm btn-danger" style="font-size:0.7rem;padding:0.15rem 0.35rem" onclick="pruefBestanden('${a.id}',false)" title="Nicht bestanden">❌</button>
+            </div>
+            <div style="display:flex;gap:0.2rem">
+              <button class="btn btn-sm btn-secondary" style="font-size:0.7rem;padding:0.15rem 0.35rem" onclick="pruefKommentar('${a.id}')" title="Kommentar">💬</button>
+              ${istWF ? `<button class="btn btn-sm btn-secondary" style="font-size:0.7rem;padding:0.15rem 0.35rem" onclick="navigate('pruefaufgabe-form',{id:'${a.id}'})">✏️</button>` : ''}
+            </div>
           </div>
         </div>
       </div>`).join('');
@@ -3017,7 +3021,7 @@ async function ladePruefaufgabenInline() {
   const dashHtml = istWF && offene.length ? `
     <div class="card" style="border-left:3px solid #ef4444;margin-bottom:0.5rem">
       <div style="font-weight:600;font-size:0.88rem;color:#ef4444;margin-bottom:0.4rem">⚠️ ${offene.length} Aufgabe${offene.length!==1?'n':''} mit Handlungsbedarf</div>
-      ${offene.map(a => `<div style="display:flex;align-items:center;gap:0.4rem;font-size:0.82rem;padding:0.2rem 0;border-bottom:1px solid var(--border)"><span style="flex:1">${a.bezeichnung}${a.kommentar?' · '+a.kommentar:''}</span><button onclick="pruefKommentar('${a.id}')" style="background:none;border:none;color:#9ca3af;cursor:pointer;font-size:0.8rem;padding:0;flex-shrink:0">💬</button></div>`).join('')}
+      ${offene.map(a => `<div style="font-size:0.82rem;padding:0.3rem 0;border-bottom:1px solid var(--border)"><div style="display:flex;align-items:center;gap:0.4rem"><span style="flex:1;font-weight:600">${a.bezeichnung}</span><button onclick="pruefKommentar('${a.id}')" style="background:none;border:none;color:#9ca3af;cursor:pointer;font-size:0.8rem;padding:0;flex-shrink:0">💬</button></div>${a.kommentar?`<div style="font-size:0.75rem;color:var(--muted);margin-top:0.1rem">${a.kommentar}</div>`:''}</div>`).join('')}
     </div>` : '';
 
   // Freitext-Notiz laden

@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
   <meta name="theme-color" content="#cc2200">
-  <meta name="app-version" content="20260320093821">
+  <meta name="app-version" content="20260320094647">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <meta name="apple-mobile-web-app-title" content="Ortswehr">
@@ -286,6 +286,13 @@
       const snap = await getDoc(doc(db, 'users', user.uid));
       if (snap.exists()) {
         fw.profil = { id: user.uid, ...snap.data() };
+        // ortswehrIds Kompatibilität
+        if (!fw.profil.ortswehrIds) {
+          fw.profil.ortswehrIds = fw.profil.ortswehrId ? [fw.profil.ortswehrId] : [];
+        }
+        if (!fw.profil.ortswehrId && fw.profil.ortswehrIds.length) {
+          fw.profil.ortswehrId = fw.profil.ortswehrIds[0];
+        }
         // Standardwerte für fehlende Einstellungen setzen
         const defaults = {};
         if (fw.profil.notif_einsatz         === undefined) defaults.notif_einsatz         = true;

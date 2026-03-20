@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
   <meta name="theme-color" content="#cc2200">
-  <meta name="app-version" content="20260320104827">
+  <meta name="app-version" content="20260320105408">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <meta name="apple-mobile-web-app-title" content="Ortswehr">
@@ -274,24 +274,20 @@
     const msg = document.getElementById('reset-msg');
     if (!loginName) { msg.textContent = 'Bitte Anmeldename eingeben'; msg.style.color = 'var(--red)'; return; }
     try {
-      const q = query(collection(db, 'users'), where('loginName', '==', loginName));
-      const snap = await getDocs(q);
-      if (snap.empty) { msg.textContent = 'Anmeldename nicht gefunden'; msg.style.color = 'var(--red)'; return; }
-      const userId = snap.docs[0].id;
-      const userName = (snap.docs[0].data().vorname||'') + ' ' + (snap.docs[0].data().nachname||'');
-      await addDoc(collection(db, 'pw_reset_requests'), {
-        userId,
-        loginName,
-        userName: userName.trim(),
-        erstellt: Timestamp.now(),
-        erledigt: false,
+      document.getElementById('reset-btn').disabled = true;
+      const res = await fetch('https://europe-west3-ffw-oegeln-791ca.cloudfunctions.net/requestPasswordReset', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ loginName }),
       });
+      if (res.status === 404) { msg.textContent = 'Anmeldename nicht gefunden'; msg.style.color = 'var(--red)'; document.getElementById('reset-btn').disabled = false; return; }
+      if (!res.ok) throw new Error(await res.text());
       msg.textContent = '✅ Wehrführer wurde informiert.';
       msg.style.color = 'var(--success)';
-      document.getElementById('reset-btn').disabled = true;
     } catch(e) {
       msg.textContent = 'Fehler: ' + e.message;
       msg.style.color = 'var(--red)';
+      document.getElementById('reset-btn').disabled = false;
     }
   });
 

@@ -2609,7 +2609,10 @@ registerPage('kameraden', async (el) => {
 
     const aufgabeZeile = (a, mitAusblenden) => {
       const key = a.typ + (a.userId||'') + (a.pruefId||'');
-      const ziel = a.userId ? `navigate('kamerad-detail',{id:'${a.userId}'})` : `navigate('dienste')`;
+      const ziel = a.typ === 'pw-reset'
+        ? `pwResetDurchfuehren('${a.resetId}','${a.userId}')`
+        : a.userId ? `navigate('kamerad-detail',{id:'${a.userId}'})`
+        : `navigate('dienste')`;
       return `
         <div style="display:flex;align-items:center;border-bottom:1px solid var(--border);padding:0.35rem 0">
           <div style="font-size:1rem;margin-right:0.5rem;cursor:pointer;flex:1" onclick="${ziel}">

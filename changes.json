@@ -1,1 +1,1 @@
-[{"version": "20260320104204", "datum": "20.03.2026", "punkte": ["NEU: Passwort-vergessen zeigt 'Wehrf\u00fchrer informieren' statt E-Mail-Reset", "NEU: Wehrf\u00fchrer sieht PW-Anfragen in Aufgabenliste und kann Passwort setzen"]}]
+[{"version": "20260320104827", "datum": "20.03.2026", "punkte": ["Fix: Passwort-Anfrage Firestore-Fehler behoben"]}]

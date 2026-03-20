@@ -584,9 +584,12 @@ function renderEintrag(u, meineMap) {
   const morgen = new Date(heute); morgen.setDate(heute.getDate()+1);
   const istHeute = u.typ === 'einsatz' && d >= heute && d < morgen;
   const highlightStyle = istHeute ? 'border-left:3px solid var(--red);padding-left:0.5rem;background:rgba(220,38,38,0.08);' : '';
+  const nichtRelevantBadge = (u.typ === 'dienst' && u.relevant === false)
+    ? `<span style="font-size:0.7rem;color:var(--muted);background:var(--panel2);border:1px solid var(--border);border-radius:4px;padding:0.1rem 0.35rem;margin-left:0.4rem">nicht relevant</span>`
+    : '';
   return `<div class="list-item" onclick="navigate('uebung-detail',{id:'${u.id}',typ:'${u.typ}'})" style="${highlightStyle}">
     <div class="list-item-body">
-      <div class="list-item-title">${istHeute ? '🚨 ' : ''}${u.titel}</div>
+      <div class="list-item-title">${istHeute ? '🚨 ' : ''}${u.titel}${nichtRelevantBadge}</div>
       ${u.ort ? `<div class="list-item-sub" style="margin-top:0.05rem">📍 ${u.ort}</div>` : ''}
       <div class="list-item-sub">${datum(u.datum)}${zeitZeile(u) ? ' · '+zeitZeile(u) : ''}</div>
     </div>
@@ -892,10 +895,8 @@ registerPage('uebung-detail', async (el, {id, typ}) => {
   const u = {id,...snap.data()};
   const isEinsatz = u.typ === 'einsatz';
   fw.setTitle(isEinsatz ? 'Einsatz' : 'Dienst');
-  fw.showBack(() => navigateBack());
+  fw.showBack(() => navigate(isEinsatz ? 'einsaetze' : 'dienste'));
   if (fw.isWehrfuehrer()) fw.showHeaderAction('✏️ Edit', () => navigate('uebung-form',{id, typ: u.typ}));
-
-  const aSnap = await fw.getDocs('anwesenheiten',
     fw.where('uebungId','==',id), fw.where('userId','==',fw.user.uid));
   const meineA = aSnap.docs[0] ? {id:aSnap.docs[0].id,...aSnap.docs[0].data()} : null;
 
@@ -1149,7 +1150,7 @@ registerPage('uebung-form', async (el, {id, typ: vorTyp, alarm: mitAlarm}) => {
           <label for="f-relevant" style="font-size:0.88rem;cursor:pointer">Zählt für 40-Stunden-Ziel</label>
         </div>` : ''}
         <div class="btn-row">
-          <button class="btn btn-primary" onclick="uebungSpeichern('${id||''}','dienst')">💾 Speichern & Benachrichtigen</button>
+          <button class="btn btn-primary" onclick="uebungSpeichern('${id||''}','dienst')">${u ? '💾 Speichern' : '💾 Speichern & Benachrichtigen'}</button>
           ${u ? `<button class="btn btn-danger" onclick="uebungLoeschen('${id}','dienst')">🗑 Löschen</button>` : ''}
         </div>
       </div>`;
@@ -1341,8 +1342,8 @@ registerPage('profil', async (el) => {
       </div>
     </div>
     <div class="stats-grid">
-      <div class="stat-card"><div class="stat-zahl">${dauerFormat(stats.dienstRelevant)}h</div><div class="stat-label">Dienste (relevant) ${new Date().getFullYear()}</div></div>
-      <div class="stat-card"><div class="stat-zahl">${dauerFormat(stats.dienstIrrelevant)}h</div><div class="stat-label">Dienste (nicht relevant) ${new Date().getFullYear()}</div></div>
+      <div class="stat-card"><div class="stat-zahl">${dauerFormat(stats.gesamtDienst)}h</div><div class="stat-label">Dienststunden ${new Date().getFullYear()}</div></div>
+      <div class="stat-card"><div class="stat-zahl">${stats.dienste}</div><div class="stat-label">${stats.dienste===1?'Dienst':'Dienste'} ${new Date().getFullYear()}</div></div>
       <div class="stat-card"><div class="stat-zahl">${dauerFormat(stats.gesamtEinsatz)}h</div><div class="stat-label">Einsatzstunden ${new Date().getFullYear()}</div></div>
       <div class="stat-card"><div class="stat-zahl">${stats.einsaetze}</div><div class="stat-label">${stats.einsaetze===1?'Einsatz':'Einsätze'} ${new Date().getFullYear()}</div></div>
     </div>

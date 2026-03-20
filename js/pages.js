@@ -898,9 +898,13 @@ let _einsatzListener = null; // aktiver onSnapshot Listener
 registerPage('uebung-detail', async (el, {id, typ}) => {
   // alten Listener aufräumen
   if (_einsatzListener) { _einsatzListener(); _einsatzListener = null; }
-  const snap = await fw.getDoc(col(typ||'dienst')+'/'+id);
+  const [snap, owSnap] = await Promise.all([
+    fw.getDoc(col(typ||'dienst')+'/'+id),
+    fw.getDocs('ortswehren'),
+  ]);
   if (!snap.exists()) { el.innerHTML='<div class="empty">Nicht gefunden</div>'; return; }
   const u = {id,...snap.data()};
+  const owMap = new Map(owSnap.docs.map(d => [d.id, d.data().name]));
   const isEinsatz = u.typ === 'einsatz';
   fw.setTitle(isEinsatz ? 'Einsatz' : 'Dienst');
   fw.showBack(() => navigate(isEinsatz ? 'einsaetze' : 'dienste'));
@@ -920,6 +924,7 @@ registerPage('uebung-detail', async (el, {id, typ}) => {
       <div style="font-weight:600;font-size:1.1rem">${u.titel}</div>
       <div style="margin-top:0.3rem;color:var(--muted);font-size:0.85rem">${datum(u.datum)}${zeitZeile(u) ? ' · '+zeitZeile(u) : ''}${!isEinsatz && u.relevant !== false ? ' · <span style="color:#22c55e;font-weight:600">40h</span>' : ''}</div>
       ${u.beschreibung ? `<p class="muted" style="margin-top:0.4rem;font-size:0.85rem">${u.beschreibung}</p>` : ''}
+      ${u.ortswehrIds?.length > 1 ? `<div style="margin-top:0.4rem;font-size:0.78rem;color:var(--muted)">Beteiligte Wehren: ${u.ortswehrIds.map(id => owMap.get(id)||id).join(', ')}</div>` : ''}
       ${u.ort ? `<div style="margin-top:0.5rem;display:flex;align-items:center;gap:0.5rem;flex-wrap:wrap">
         <span style="font-size:0.85rem">📍 ${u.ort}</span>
         ${isEinsatz ? `<a href="https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(u.ort)}" target="_blank"
@@ -1128,6 +1133,20 @@ registerPage('uebung-form', async (el, {id, typ: vorTyp, alarm: mitAlarm}) => {
         <div class="ac-wrapper" style="position:relative;margin-bottom:0.5rem">
           <input id="f-ort" value="${u?.ort||''}" placeholder="Einsatzort / Adresse (optional)">
         </div>
+        ${await (async () => {
+          const owSnap3 = await fw.getDocs('ortswehren');
+          const wehren3 = owSnap3.docs.map(d => ({id:d.id,...d.data()}));
+          if (wehren3.length <= 1) return '';
+          const aktiveIds = u?.ortswehrIds || (fw.profil.ortswehrIds || []);
+          return `<div style="margin-bottom:0.5rem"><label style="font-size:0.82rem;color:var(--muted)">Beteiligte Wehren</label>
+            <div style="display:flex;flex-wrap:wrap;gap:0.4rem;margin-top:0.2rem">
+              ${wehren3.map(w => `<label style="display:flex;align-items:center;gap:0.3rem;font-size:0.82rem;cursor:pointer;background:var(--panel2);border:1px solid var(--border);border-radius:6px;padding:0.2rem 0.5rem">
+                <input type="checkbox" class="f-wehr-cb" value="${w.id}" ${aktiveIds.includes(w.id)?'checked':''} style="width:0.9rem;height:0.9rem;accent-color:var(--red)">
+                ${w.name}
+              </label>`).join('')}
+            </div>
+          </div>`;
+        })()}
         <div style="display:flex;gap:0.5rem">
           <input id="f-beginn" type="time" value="${u?.zeitBeginn||jetztZeit}" style="flex:1">
           <input id="f-ende" type="time" value="${u?.zeitEnde||''}" placeholder="Ende (optional)" style="flex:1">
@@ -2308,6 +2327,10 @@ registerPage('news-form', async (el) => {
           ${optionen.map((o,i) => `<div class="form-row"><label>Option ${i+1}</label><input class="nf-opt" data-i="${i}" value="${o}"></div>`).join('')}
           <button class="btn btn-secondary btn-sm" onclick="nfAddOption()">+ Option</button>
         </div>
+        <div class="form-row" id="nf-wehr-container">
+          <label>Sichtbar für</label>
+          <div id="nf-wehr-boxes" style="display:flex;flex-direction:column;gap:0.3rem;margin-top:0.2rem">⏳</div>
+        </div>
         <div class="btn-row" style="margin-top:1rem">
           <button class="btn btn-primary" onclick="newsSpeichern()" id="nf-save-btn">💾 Veröffentlichen</button>
         </div>
@@ -2865,11 +2888,13 @@ registerPage('kamerad-form', async (el, {id}) => {
       ${!u ? `<div class="form-row"><label>Benutzername (Login)</label><input id="k-email" type="text" readonly style="color:var(--muted)" placeholder="wird automatisch generiert"></div>` : ''}
       <div class="form-row"><label>Dienstgrad</label><select id="k-dg"><option value="">– wählen –</option><option value="Feuerwehrmann-Anwärter" ${u?.dienstgrad==="Feuerwehrmann-Anwärter"?"selected":""}>Feuerwehrmann-Anwärter</option><option value="Feuerwehrmann" ${u?.dienstgrad==="Feuerwehrmann"?"selected":""}>Feuerwehrmann</option><option value="Oberfeuerwehrmann" ${u?.dienstgrad==="Oberfeuerwehrmann"?"selected":""}>Oberfeuerwehrmann</option><option value="Hauptfeuerwehrmann" ${u?.dienstgrad==="Hauptfeuerwehrmann"?"selected":""}>Hauptfeuerwehrmann</option><option value="1. Hauptfeuerwehrmann" ${u?.dienstgrad==="1. Hauptfeuerwehrmann"?"selected":""}>1. Hauptfeuerwehrmann</option><option value="Löschmeister" ${u?.dienstgrad==="Löschmeister"?"selected":""}>Löschmeister</option><option value="Oberlöschmeister" ${u?.dienstgrad==="Oberlöschmeister"?"selected":""}>Oberlöschmeister</option><option value="Hauptlöschmeister" ${u?.dienstgrad==="Hauptlöschmeister"?"selected":""}>Hauptlöschmeister</option><option value="1. Hauptlöschmeister" ${u?.dienstgrad==="1. Hauptlöschmeister"?"selected":""}>1. Hauptlöschmeister</option><option value="Brandmeister" ${u?.dienstgrad==="Brandmeister"?"selected":""}>Brandmeister</option><option value="Oberbrandmeister" ${u?.dienstgrad==="Oberbrandmeister"?"selected":""}>Oberbrandmeister</option><option value="Hauptbrandmeister" ${u?.dienstgrad==="Hauptbrandmeister"?"selected":""}>Hauptbrandmeister</option><option value="1. Hauptbrandmeister" ${u?.dienstgrad==="1. Hauptbrandmeister"?"selected":""}>1. Hauptbrandmeister</option></select></div>
       <div class="form-row"><label>Eintrittsdatum</label><input id="k-ed" type="date" value="${datumVal}"></div>
-      <div class="form-row"><label>Ortswehr</label>
-        <select id="k-ow">
-          <option value="">– Keine Zuordnung –</option>
-          ${owOptions}
-        </select>
+      <div class="form-row"><label>Ortswehr(en)</label>
+        <div style="display:flex;flex-direction:column;gap:0.3rem;margin-top:0.2rem">
+          ${ortswehren.map(o => `<label style="display:flex;align-items:center;gap:0.5rem;font-size:0.88rem;cursor:pointer">
+            <input type="checkbox" class="k-ow-cb" value="${o.id}" ${(u?.ortswehrIds||[u?.ortswehrId].filter(Boolean)).includes(o.id)?'checked':''} style="width:1rem;height:1rem;accent-color:var(--red)">
+            ${o.name}
+          </label>`).join('')}
+        </div>
       </div>
       <div class="form-row"><label>Rolle</label>
         <select id="k-rolle" onchange="rolleGeaendert(this.value)">
@@ -2925,8 +2950,8 @@ window.kameradSpeichern = async (id) => {
     nachname: document.getElementById('k-nn').value,
     dienstgrad: document.getElementById('k-dg').value,
     eintrittsdatum: document.getElementById('k-ed').value || null,
-    ortswehrIds: document.getElementById('k-ow').value ? [document.getElementById('k-ow').value] : [],
-    ortswehrId: document.getElementById('k-ow').value || null, // Kompatibilität
+    ortswehrIds: [...document.querySelectorAll('.k-ow-cb:checked')].map(cb => cb.value),
+    ortswehrId: document.querySelector('.k-ow-cb:checked')?.value || null, // Kompatibilität
     rolle: document.getElementById('k-rolle').value,
     staerkeRolle: document.getElementById('k-rolle').value === 'wehrfuehrer'
       ? (document.getElementById('k-staerke-rolle')?.value || 'kamerad')

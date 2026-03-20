@@ -2405,7 +2405,7 @@ registerPage('kameraden', async (el) => {
     const pruefSnap = await fw.getDocs('pruefaufgaben');
     const pruefIssues = pruefSnap.docs
       .map(d => ({id: d.id, ...d.data()}))
-      .filter(p => p.id !== '__notiz__' && !p.ausgeblendet && (p.bestanden === false || p.kommentar));
+      .filter(p => p.id !== 'allgemeine-notiz' && !p.ausgeblendet && (p.bestanden === false || p.kommentar));
     for (const p of pruefIssues) {
       if (p.bestanden === false) {
         aufgaben.push({ typ: 'pruef-fail', text: `Geräteprüfung nicht bestanden: ${p.bezeichnung}`, pruefId: p.id });
@@ -2417,10 +2417,37 @@ registerPage('kameraden', async (el) => {
     // Ausgeblendete Aufgaben aus Firestore laden
     const ausgeblendetSnap = await fw.getDoc('users/'+fw.user.uid+'/settings/aufgaben_ausgeblendet').catch(() => null);
     const ausgeblendet = new Set((ausgeblendetSnap?.data()?.ids) || []);
-    const sichtbareAufgaben = aufgaben.filter((a, i) => !ausgeblendet.has(a.typ + (a.userId||'') + (a.pruefId||'')));
+    const ausgeblendetAufgaben = aufgaben.filter(a => ausgeblendet.has(a.typ + (a.userId||'') + (a.pruefId||'')));
+    const sichtbareAufgaben = aufgaben.filter(a => !ausgeblendet.has(a.typ + (a.userId||'') + (a.pruefId||'')));
 
-    if (sichtbareAufgaben.length) {
-      const icons = { 'kein-datum': '📅', 'agt': '🔴', 'eh': '⚠️', 'dienstgrad': '🪖', 'pruef-fail': '❌', 'pruef-kommentar': '💬' };
+    const icons = { 'kein-datum': '📅', 'agt': '🔴', 'eh': '⚠️', 'dienstgrad': '🪖', 'pruef-fail': '❌', 'pruef-kommentar': '💬' };
+
+    const aufgabeZeile = (a, mitAusblenden) => {
+      const key = a.typ + (a.userId||'') + (a.pruefId||'');
+      const ziel = a.userId ? `navigate('kamerad-detail',{id:'${a.userId}'})` : `navigate('dienste')`;
+      return `
+        <div style="display:flex;align-items:center;border-bottom:1px solid var(--border);padding:0.35rem 0">
+          <div style="font-size:1rem;margin-right:0.5rem;cursor:pointer;flex:1" onclick="${ziel}">
+            ${icons[a.typ]||'•'} <span style="font-size:0.83rem">${a.text}</span>
+          </div>
+          ${mitAusblenden
+            ? `<button onclick="aufgabeAusblenden('${key}')" style="background:none;border:none;color:#9ca3af;cursor:pointer;font-size:0.75rem;padding:0.1rem 0.3rem" title="Ausblenden">Ausblenden</button>`
+            : `<button onclick="aufgabeEinblenden('${key}')" style="background:none;border:none;color:#9ca3af;cursor:pointer;font-size:0.75rem;padding:0.1rem 0.3rem" title="Wieder einblenden">Einblenden</button>`
+          }
+        </div>`;
+    };
+
+    const archivBlock = ausgeblendetAufgaben.length ? `
+      <details style="margin-top:0.4rem">
+        <summary style="font-size:0.82rem;color:var(--muted);cursor:pointer;padding:0.3rem 0">
+          Ausgeblendet (${ausgeblendetAufgaben.length})
+        </summary>
+        <div style="margin-top:0.3rem">
+          ${ausgeblendetAufgaben.map(a => aufgabeZeile(a, false)).join('')}
+        </div>
+      </details>` : '';
+
+    if (sichtbareAufgaben.length || ausgeblendetAufgaben.length) {
       aufgabenHtml = `
         <details class="card" style="margin-bottom:0.6rem;padding:0" open>
           <summary style="list-style:none;padding:0.4rem 0.8rem;cursor:pointer;display:flex;align-items:center;justify-content:space-between;font-size:13px;border-radius:8px">
@@ -2428,17 +2455,8 @@ registerPage('kameraden', async (el) => {
             <span style="color:var(--muted);font-size:1.1rem">▾</span>
           </summary>
           <div style="padding:0 0.8rem 0.8rem">
-            ${sichtbareAufgaben.map(a => {
-              const key = a.typ + (a.userId||'') + (a.pruefId||'');
-              const ziel = a.userId ? `navigate('kamerad-detail',{id:'${a.userId}'})` : `navigate('dienste')`;
-              return `
-              <div style="display:flex;align-items:center;border-bottom:1px solid var(--border);padding:0.35rem 0">
-                <div style="font-size:1rem;margin-right:0.5rem;cursor:pointer;flex:1" onclick="${ziel}">
-                  ${icons[a.typ]||'•'} <span style="font-size:0.83rem">${a.text}</span>
-                </div>
-                <button onclick="aufgabeAusblenden('${key}')" style="background:none;border:none;color:#9ca3af;cursor:pointer;font-size:0.75rem;padding:0.1rem 0.3rem" title="Ausblenden">🙈</button>
-              </div>`;
-            }).join('')}
+            ${sichtbareAufgaben.map(a => aufgabeZeile(a, true)).join('')}
+            ${archivBlock}
           </div>
         </details>`;
     } else {
@@ -2451,6 +2469,15 @@ registerPage('kameraden', async (el) => {
       ids.add(key);
       await fw.setDoc('users/'+fw.user.uid+'/settings/aufgaben_ausgeblendet', { ids: [...ids] });
       fw.toast('Ausgeblendet');
+      navigate('kameraden');
+    };
+
+    window.aufgabeEinblenden = async (key) => {
+      const snap = await fw.getDoc('users/'+fw.user.uid+'/settings/aufgaben_ausgeblendet').catch(() => null);
+      const ids = new Set((snap?.data()?.ids) || []);
+      ids.delete(key);
+      await fw.setDoc('users/'+fw.user.uid+'/settings/aufgaben_ausgeblendet', { ids: [...ids] });
+      fw.toast('Wieder eingeblendet ✅');
       navigate('kameraden');
     };
   }
@@ -2994,7 +3021,7 @@ async function ladePruefaufgabenInline() {
     </div>` : '';
 
   // Freitext-Notiz laden
-  const notizSnap = await fw.getDoc('pruefaufgaben/__notiz__');
+  const notizSnap = await fw.getDoc('pruefaufgaben/allgemeine-notiz');
   const notizText = notizSnap.exists() ? (notizSnap.data().text || '') : '';
 
   el.innerHTML = dashHtml + fahrzeuge.map(f => `
@@ -3018,7 +3045,7 @@ async function ladePruefaufgabenInline() {
 
   window.pruefNotizSpeichern = async () => {
     const text = document.getElementById('pruef-notiz')?.value || '';
-    await fw.setDoc('pruefaufgaben/__notiz__', { text });
+    await fw.setDoc('pruefaufgaben/allgemeine-notiz', { text });
     fw.toast('Notiz gespeichert ✅');
   };
 }

@@ -2401,26 +2401,58 @@ registerPage('kameraden', async (el) => {
       }
     }
 
-    if (aufgaben.length) {
-      const icons = { 'kein-datum': '📅', 'agt': '🔴', 'eh': '⚠️', 'dienstgrad': '🪖' };
+    // Geräteprüfungen: nicht bestandene + kommentierte laden
+    const pruefSnap = await fw.getDocs('pruefaufgaben');
+    const pruefIssues = pruefSnap.docs
+      .map(d => ({id: d.id, ...d.data()}))
+      .filter(p => p.id !== '__notiz__' && !p.ausgeblendet && (p.bestanden === false || p.kommentar));
+    for (const p of pruefIssues) {
+      if (p.bestanden === false) {
+        aufgaben.push({ typ: 'pruef-fail', text: `Geräteprüfung nicht bestanden: ${p.bezeichnung}`, pruefId: p.id });
+      } else if (p.kommentar) {
+        aufgaben.push({ typ: 'pruef-kommentar', text: `Prüfung Kommentar: ${p.bezeichnung} – ${p.kommentar}`, pruefId: p.id });
+      }
+    }
+
+    // Ausgeblendete Aufgaben aus Firestore laden
+    const ausgeblendetSnap = await fw.getDoc('users/'+fw.user.uid+'/settings/aufgaben_ausgeblendet').catch(() => null);
+    const ausgeblendet = new Set((ausgeblendetSnap?.data()?.ids) || []);
+    const sichtbareAufgaben = aufgaben.filter((a, i) => !ausgeblendet.has(a.typ + (a.userId||'') + (a.pruefId||'')));
+
+    if (sichtbareAufgaben.length) {
+      const icons = { 'kein-datum': '📅', 'agt': '🔴', 'eh': '⚠️', 'dienstgrad': '🪖', 'pruef-fail': '❌', 'pruef-kommentar': '💬' };
       aufgabenHtml = `
-        <details class="card" style="margin-bottom:0.6rem;padding:0">
+        <details class="card" style="margin-bottom:0.6rem;padding:0" open>
           <summary style="list-style:none;padding:0.4rem 0.8rem;cursor:pointer;display:flex;align-items:center;justify-content:space-between;font-size:13px;border-radius:8px">
-            <span style="font-weight:600;color:#f59e0b">⚠️ Offene Aufgaben (${aufgaben.length})</span>
+            <span style="font-weight:600;color:#f59e0b">⚠️ Offene Aufgaben (${sichtbareAufgaben.length})</span>
             <span style="color:var(--muted);font-size:1.1rem">▾</span>
           </summary>
           <div style="padding:0 0.8rem 0.8rem">
-            ${aufgaben.map(a => `
-              <div class="list-item" onclick="navigate('kamerad-detail',{id:'${a.userId}'})" style="border-bottom:1px solid var(--border);cursor:pointer">
-                <div style="font-size:1rem;margin-right:0.5rem">${icons[a.typ]||'•'}</div>
-                <div class="list-item-body"><div style="font-size:0.83rem">${a.text}</div></div>
-                <div class="list-chevron">›</div>
-              </div>`).join('')}
+            ${sichtbareAufgaben.map(a => {
+              const key = a.typ + (a.userId||'') + (a.pruefId||'');
+              const ziel = a.userId ? `navigate('kamerad-detail',{id:'${a.userId}'})` : `navigate('dienste')`;
+              return `
+              <div style="display:flex;align-items:center;border-bottom:1px solid var(--border);padding:0.35rem 0">
+                <div style="font-size:1rem;margin-right:0.5rem;cursor:pointer;flex:1" onclick="${ziel}">
+                  ${icons[a.typ]||'•'} <span style="font-size:0.83rem">${a.text}</span>
+                </div>
+                <button onclick="aufgabeAusblenden('${key}')" style="background:none;border:none;color:#9ca3af;cursor:pointer;font-size:0.75rem;padding:0.1rem 0.3rem" title="Ausblenden">🙈</button>
+              </div>`;
+            }).join('')}
           </div>
         </details>`;
     } else {
       aufgabenHtml = `<div class="card" style="margin-bottom:0.6rem;color:#22c55e;font-size:0.88rem">✅ Keine offenen Aufgaben</div>`;
     }
+
+    window.aufgabeAusblenden = async (key) => {
+      const snap = await fw.getDoc('users/'+fw.user.uid+'/settings/aufgaben_ausgeblendet').catch(() => null);
+      const ids = new Set((snap?.data()?.ids) || []);
+      ids.add(key);
+      await fw.setDoc('users/'+fw.user.uid+'/settings/aufgaben_ausgeblendet', { ids: [...ids] });
+      fw.toast('Ausgeblendet');
+      navigate('kameraden');
+    };
   }
 
   el.innerHTML = `
@@ -2916,23 +2948,33 @@ async function ladePruefaufgabenInline() {
 
   function datumsAnzeige(a) {
     if (!a.letztesPruefDatum) return 'Noch nie geprüft';
-    const d = a.letztesPruefDatum.toDate ? a.letztesPruefDatum.toDate() : new Date(a.letztesPruefDatum);
-    return d.toLocaleDateString('de-DE');
+    if (!a.intervall) {
+      const d = a.letztesPruefDatum.toDate ? a.letztesPruefDatum.toDate() : new Date(a.letztesPruefDatum);
+      return 'Zuletzt: ' + d.toLocaleDateString('de-DE');
+    }
+    const letztes = a.letztesPruefDatum.toDate ? a.letztesPruefDatum.toDate() : new Date(a.letztesPruefDatum);
+    const naechstes = new Date(letztes); naechstes.setMonth(naechstes.getMonth() + a.intervall);
+    return 'Nächste: ' + naechstes.toLocaleDateString('de-DE');
   }
 
   function aufgabenHtml(fahrzeugId) {
     const aufgaben = alleAufgaben.filter(a => a.fahrzeugId === fahrzeugId);
     if (aufgaben.length === 0) return '<p class="muted" style="font-size:0.82rem;padding:0.3rem 0">Keine Aufgaben</p>';
-    return aufgaben.map(a => `
-      <div style="display:flex;align-items:center;gap:0.6rem;padding:0.45rem 0;border-bottom:1px solid var(--border)">
-        <div style="width:10px;height:10px;border-radius:50%;flex-shrink:0;background:${statusFarbe(a)}"></div>
-        <div style="flex:1;min-width:0">
-          <div style="font-size:0.85rem;font-weight:600">${a.bezeichnung}</div>
-          <div style="font-size:0.73rem;color:var(--muted)">${datumsAnzeige(a)}${a.intervall ? ` · alle ${a.intervall} Mon.` : ''}</div>
-        </div>
-        <div style="display:flex;gap:0.3rem;flex-shrink:0">
-          <button class="btn btn-sm btn-secondary" style="font-size:0.7rem;padding:0.2rem 0.45rem" onclick="pruefDatumAktualisieren('${a.id}')">✅</button>
-          ${istWF ? `<button class="btn btn-sm btn-secondary" style="font-size:0.7rem;padding:0.2rem 0.45rem" onclick="navigate('pruefaufgabe-form',{id:'${a.id}'})">✏️</button>` : ''}
+    return aufgaben.filter(a => !a.ausgeblendet).map(a => `
+      <div style="padding:0.5rem 0;border-bottom:1px solid var(--border)">
+        <div style="display:flex;align-items:center;gap:0.6rem">
+          <div style="width:10px;height:10px;border-radius:50%;flex-shrink:0;background:${statusFarbe(a)}"></div>
+          <div style="flex:1;min-width:0">
+            <div style="font-size:0.85rem;font-weight:600">${a.bezeichnung}</div>
+            <div style="font-size:0.73rem;color:var(--muted)">${datumsAnzeige(a)}${a.intervall ? ` · alle ${a.intervall} Mon.` : ''}</div>
+            ${a.kommentar ? `<div style="font-size:0.73rem;color:var(--muted);margin-top:0.15rem">💬 ${a.kommentar}</div>` : ''}
+          </div>
+          <div style="display:flex;gap:0.3rem;flex-shrink:0">
+            <button class="btn btn-sm btn-success" style="font-size:0.7rem;padding:0.2rem 0.45rem" onclick="pruefBestanden('${a.id}',true)" title="Bestanden">✅</button>
+            <button class="btn btn-sm btn-danger" style="font-size:0.7rem;padding:0.2rem 0.45rem" onclick="pruefBestanden('${a.id}',false)" title="Nicht bestanden">❌</button>
+            <button class="btn btn-sm btn-secondary" style="font-size:0.7rem;padding:0.2rem 0.45rem" onclick="pruefKommentar('${a.id}')" title="Kommentar">💬</button>
+            ${istWF ? `<button class="btn btn-sm btn-secondary" style="font-size:0.7rem;padding:0.2rem 0.45rem" onclick="navigate('pruefaufgabe-form',{id:'${a.id}'})">✏️</button>` : ''}
+          </div>
         </div>
       </div>`).join('');
   }
@@ -2943,7 +2985,19 @@ async function ladePruefaufgabenInline() {
     return;
   }
 
-  el.innerHTML = fahrzeuge.map(f => `
+  // Dashboard-Hinweis: nicht bestandene oder kommentierte Aufgaben
+  const offene = alleAufgaben.filter(a => !a.ausgeblendet && (a.bestanden === false || a.kommentar));
+  const dashHtml = istWF && offene.length ? `
+    <div class="card" style="border-left:3px solid #ef4444;margin-bottom:0.5rem">
+      <div style="font-weight:600;font-size:0.88rem;color:#ef4444;margin-bottom:0.4rem">⚠️ ${offene.length} Aufgabe${offene.length!==1?'n':''} mit Handlungsbedarf</div>
+      ${offene.map(a => `<div style="font-size:0.82rem;padding:0.2rem 0;border-bottom:1px solid var(--border)">${a.bezeichnung}${a.bestanden===false?' · <span style="color:#ef4444">nicht bestanden</span>':''}${a.kommentar?' · 💬 '+a.kommentar:''}</div>`).join('')}
+    </div>` : '';
+
+  // Freitext-Notiz laden
+  const notizSnap = await fw.getDoc('pruefaufgaben/__notiz__');
+  const notizText = notizSnap.exists() ? (notizSnap.data().text || '') : '';
+
+  el.innerHTML = dashHtml + fahrzeuge.map(f => `
     <details style="margin-bottom:0.5rem;border:1px solid var(--border);border-radius:10px">
       <summary style="padding:0.4rem 0.8rem;cursor:pointer;list-style:none;display:flex;align-items:center;justify-content:space-between;font-weight:600;font-size:13px;border-radius:8px">
         <span>${f.name}${f.bezeichnung ? ` <span style="font-weight:400;color:var(--muted);font-size:0.8rem">(${f.bezeichnung})</span>` : ''}</span>
@@ -2955,13 +3009,49 @@ async function ladePruefaufgabenInline() {
       </summary>
       <div style="padding:0 0.8rem 0.8rem">${aufgabenHtml(f.id)}</div>
     </details>`).join('') +
+    `<div class="card" style="margin-top:0.5rem">
+      <div style="font-size:0.82rem;font-weight:600;color:var(--muted);margin-bottom:0.4rem">Allgemeine Notizen</div>
+      <textarea id="pruef-notiz" rows="4" style="width:100%;background:var(--panel2);border:1px solid var(--border);border-radius:8px;padding:0.6rem;font-size:0.82rem;color:var(--text);resize:vertical">${notizText}</textarea>
+      <button class="btn btn-secondary btn-sm btn-full" style="margin-top:0.4rem" onclick="pruefNotizSpeichern()">💾 Notiz speichern</button>
+    </div>` +
     (istWF ? `<button class="btn btn-secondary btn-sm" style="margin-top:0.5rem" onclick="navigate('fahrzeug-form',{})">+ Fahrzeug hinzufügen</button>` : '');
+
+  window.pruefNotizSpeichern = async () => {
+    const text = document.getElementById('pruef-notiz')?.value || '';
+    await fw.setDoc('pruefaufgaben/__notiz__', { text });
+    fw.toast('Notiz gespeichert ✅');
+  };
 }
 
+window.pruefBestanden = async (id, bestanden) => {
+  const label = bestanden ? 'Bestanden' : 'Nicht bestanden';
+  if (!confirm(`Aufgabe als "${label}" markieren?`)) return;
+  await fw.setDoc('pruefaufgaben/'+id, {
+    letztesPruefDatum: new Date(),
+    bestanden,
+  });
+  fw.toast(bestanden ? 'Als bestanden markiert ✅' : 'Als nicht bestanden markiert ❌');
+  ladePruefaufgabenInline();
+};
+
 window.pruefDatumAktualisieren = async (id) => {
-  if (!confirm('Prüfung heute als durchgeführt markieren?')) return;
-  await fw.setDoc('pruefaufgaben/'+id, { letztesPruefDatum: new Date() });
-  fw.toast('Prüfung aktualisiert ✅');
+  await pruefBestanden(id, true);
+};
+
+window.pruefKommentar = async (id) => {
+  const snap = await fw.getDoc('pruefaufgaben/'+id);
+  const aktuell = snap.data()?.kommentar || '';
+  const neu = prompt('Kommentar:', aktuell);
+  if (neu === null) return;
+  await fw.setDoc('pruefaufgaben/'+id, { kommentar: neu.trim() || null });
+  fw.toast('Kommentar gespeichert ✅');
+  ladePruefaufgabenInline();
+};
+
+window.pruefAusblenden = async (id) => {
+  if (!confirm('Aufgabe dauerhaft ausblenden?')) return;
+  await fw.setDoc('pruefaufgaben/'+id, { ausgeblendet: true });
+  fw.toast('Ausgeblendet');
   ladePruefaufgabenInline();
 };
 
@@ -3057,6 +3147,7 @@ registerPage('pruefaufgabe-form', async (el, {id, fahrzeugId: vorFahrzeugId}) =>
       <div class="form-row"><label>Bezeichnung</label><input id="pa-bez" value="${aufgabe?.bezeichnung||''}"></div>
       <div class="form-row"><label>Intervall (Monate)</label><input id="pa-int" type="number" min="1" value="${aufgabe?.intervall||''}"></div>
       <div class="form-row"><label>Letztes Prüfdatum</label><input id="pa-dat" type="date" value="${letztesDatum}"></div>
+      ${aufgabe?.ausgeblendet ? `<div style="margin-bottom:0.5rem"><button class="btn btn-secondary btn-full" onclick="pruefEinblenden('${id}')">👁 Wieder einblenden</button></div>` : ''}
       <div class="btn-row" style="margin-top:0.5rem">
         <button class="btn btn-primary" onclick="pruefaufgabeSpeichern('${id||''}')">💾 Speichern</button>
         ${id ? `<button class="btn btn-danger" onclick="pruefaufgabeLoeschen('${id}')">🗑 Löschen</button>` : ''}
@@ -3064,6 +3155,12 @@ registerPage('pruefaufgabe-form', async (el, {id, fahrzeugId: vorFahrzeugId}) =>
     </div>
   `;
 });
+
+window.pruefEinblenden = async (id) => {
+  await fw.setDoc('pruefaufgaben/'+id, { ausgeblendet: false });
+  fw.toast('Wieder eingeblendet ✅');
+  navigateBack();
+};
 
 window.pruefaufgabeSpeichern = async (id) => {
   const fzId = document.getElementById('pa-fz').value;
@@ -3086,13 +3183,6 @@ window.pruefaufgabeLoeschen = async (id) => {
   navigate('dienste');
 };
 
-window.pruefDatumAktualisieren = async (id) => {
-  if (!confirm('Prüfung heute als durchgeführt markieren?')) return;
-  await fw.setDoc('pruefaufgaben/'+id, { letztesPruefDatum: new Date() });
-  fw.toast('Prüfung aktualisiert ✅');
-  ladePruefaufgabenInline();
-};
-
 // ── Fahrzeug Form ─────────────────────────────────────────
 registerPage('fahrzeug-form', async (el, {id}) => {
   if (!fw.isWehrfuehrer()) { el.innerHTML = '<div class="empty">Keine Berechtigung</div>'; return; }
@@ -3185,6 +3275,7 @@ registerPage('pruefaufgabe-form', async (el, {id, fahrzeugId: vorFahrzeugId}) =>
       <div class="form-row"><label>Bezeichnung</label><input id="pa-bez" value="${aufgabe?.bezeichnung||''}"></div>
       <div class="form-row"><label>Intervall (Monate)</label><input id="pa-int" type="number" min="1" value="${aufgabe?.intervall||''}"></div>
       <div class="form-row"><label>Letztes Prüfdatum</label><input id="pa-dat" type="date" value="${letztesDatum}"></div>
+      ${aufgabe?.ausgeblendet ? `<div style="margin-bottom:0.5rem"><button class="btn btn-secondary btn-full" onclick="pruefEinblenden('${id}')">👁 Wieder einblenden</button></div>` : ''}
       <div class="btn-row" style="margin-top:0.5rem">
         <button class="btn btn-primary" onclick="pruefaufgabeSpeichern('${id||''}')">💾 Speichern</button>
         ${id ? `<button class="btn btn-danger" onclick="pruefaufgabeLoeschen('${id}')">🗑 Löschen</button>` : ''}
@@ -3192,6 +3283,12 @@ registerPage('pruefaufgabe-form', async (el, {id, fahrzeugId: vorFahrzeugId}) =>
     </div>
   `;
 });
+
+window.pruefEinblenden = async (id) => {
+  await fw.setDoc('pruefaufgaben/'+id, { ausgeblendet: false });
+  fw.toast('Wieder eingeblendet ✅');
+  navigateBack();
+};
 
 window.pruefaufgabeSpeichern = async (id) => {
   const fzId = document.getElementById('pa-fz').value;

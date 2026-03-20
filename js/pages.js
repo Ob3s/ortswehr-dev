@@ -986,7 +986,7 @@ registerPage('uebung-detail', async (el, {id, typ}) => {
         </div>
       ` : ''}
     </div>
-    <div style="margin-top:0.8rem;border-top:1px solid var(--border)"></div>
+    <div class="section-header"><span id="einsatz-zaehler" style="font-weight:400;font-size:0.85rem"></span></div>
     <div id="einsatz-reaktionen" class="card">⏳ Lade...</div>
     <div class="card" style="display:flex;gap:0.8rem">
       <button class="btn btn-full" id="btn-kommt"
@@ -1339,7 +1339,18 @@ window.ortSpeichern = async (einsatzId) => {
   const ort = document.getElementById('ort-inline')?.value?.trim();
   if (!ort) { fw.toast('Bitte Adresse eingeben', true); return; }
   await fw.updateDoc('einsaetze/'+einsatzId, { ort });
-  fw.toast('Adresse gespeichert 📍'); navigate('uebung-detail', {id: einsatzId, typ: 'einsatz'});
+  fw.toast('Adresse gespeichert 📍');
+  const ortAnzeige = document.getElementById('ort-anzeige');
+  if (ortAnzeige) {
+    ortAnzeige.innerHTML = `<div style="margin-top:0.5rem;display:flex;align-items:center;gap:0.5rem;flex-wrap:wrap">
+      <span style="font-size:0.85rem">📍 ${ort}</span>
+      <a href="https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(ort)}" target="_blank"
+        style="font-size:0.75rem;padding:0.2rem 0.6rem;background:var(--panel2);border-radius:20px;color:var(--blue);text-decoration:none;border:1px solid var(--border)">
+        🗺 Navigation
+      </a>
+    </div>`;
+  }
+  document.getElementById('ort-inline-wrapper')?.remove();
 };
 
 window.uebungLoeschen = async (id, typ) => {

@@ -942,7 +942,7 @@ registerPage('uebung-detail', async (el, {id, typ}) => {
         </div>
       ` : ''}
     </div>
-    <div class="section-header">Wer kommt? <span id="einsatz-zaehler" style="font-weight:400;font-size:0.85rem"></span></div>
+    <div style="height:0.5rem"></div>
     <div id="einsatz-reaktionen" class="card">⏳ Lade...</div>
     <div class="card" style="display:flex;gap:0.8rem">
       <button class="btn btn-full" id="btn-kommt"
@@ -2627,7 +2627,7 @@ registerPage('kameraden', async (el) => {
 
     if (sichtbareAufgaben.length || ausgeblendetAufgaben.length) {
       aufgabenHtml = `
-        <details class="card" style="margin-bottom:0.6rem;padding:0" open>
+        <details class="card" style="margin-bottom:0.6rem;padding:0">
           <summary style="list-style:none;padding:0.4rem 0.8rem;cursor:pointer;display:flex;align-items:center;justify-content:space-between;font-size:13px;border-radius:8px">
             <span style="font-weight:600;color:#f59e0b">⚠️ Offene Aufgaben (${sichtbareAufgaben.length})</span>
             <span style="color:var(--muted);font-size:1.1rem">▾</span>

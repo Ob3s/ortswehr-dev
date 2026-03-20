@@ -1471,6 +1471,7 @@ window.notifSpeichern = async () => {
   const data = {
     notif_einsatz:         document.getElementById('n-einsatz')?.checked ?? true,
     notif_dienst_reminder: document.getElementById('n-dienst-reminder')?.checked ?? false,
+    notif_news:            document.getElementById('n-news')?.checked ?? true,
     notif_selbst:          selbstEl ? selbstEl.checked : false,
     notif_status:          document.getElementById('n-status')?.checked ?? true,
   };
@@ -1579,6 +1580,7 @@ registerPage('einstellungen', async (el) => {
     <div class="card">
       ${notifRow('n-einsatz', '🚨', 'Einsatzalarm', 'Bei neuen Einsätzen')}
       ${notifRow('n-dienst-reminder', '📅', 'Diensterinnerung', 'Am Morgen des Dienstes um 08:00 Uhr')}
+      ${notifRow('n-news', '📰', 'Neuigkeiten', 'Bei neuen Beiträgen für meine Ortswehr')}
       ${notifRow('n-status', '⚠️', 'Status-Warnung', 'Wenn App offline oder Push nicht bereit')}
       ${fw.isWehrfuehrer() ? notifRow('n-selbst', '🧪', 'Selbst benachrichtigen', 'Nur für Tests – Wehrführer erhält eigene Alarme') : ''}
       <button class="btn btn-primary btn-full" style="margin-top:0.8rem" onclick="notifSpeichern()">💾 Speichern</button>
@@ -1614,6 +1616,7 @@ registerPage('einstellungen', async (el) => {
   const cb = id => document.getElementById(id);
   if (cb('n-einsatz'))        cb('n-einsatz').checked        = me.notif_einsatz !== false;
   if (cb('n-dienst-reminder'))cb('n-dienst-reminder').checked = me.notif_dienst_reminder === true;
+  if (cb('n-news'))           cb('n-news').checked            = me.notif_news !== false;
   if (cb('n-status'))         cb('n-status').checked         = me.notif_status !== false;
   if (cb('n-selbst'))         cb('n-selbst').checked         = me.notif_selbst === true;
 

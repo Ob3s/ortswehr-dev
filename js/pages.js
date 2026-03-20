@@ -602,7 +602,8 @@ window.tokenErneuern = async (btn) => {
       fw.toast('Bitte App neu starten um Token zu erneuern', true);
     } else {
       // PWA: Token über Messaging API holen
-      const swReg = await navigator.serviceWorker.getRegistration('/firebase-messaging-sw.js');
+      const swReg = await navigator.serviceWorker.getRegistration('/ortswehr/sw.js')
+        || await navigator.serviceWorker.ready;
       if (!swReg) throw new Error('Service Worker nicht registriert');
       const { getToken } = await import('https://www.gstatic.com/firebasejs/10.8.0/firebase-messaging.js');
       const token = await getToken(fw.messaging, { vapidKey: fw._vapid, serviceWorkerRegistration: swReg });

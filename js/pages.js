@@ -1965,7 +1965,7 @@ registerPage('lehrgaenge', async (el) => {
     const qualiPerUser = {};
     qualiSnaps.forEach(({userId, qualis}) => { qualiPerUser[userId] = qualis.map(q => (q.bezeichnung||'').trim().toLowerCase()); });
 
-    const cols = ALLE_LEHRGAENGE;
+    const cols = getLehrgangsartenNamen();
     const rows = users.map(u => {
       const hat = qualiPerUser[u.id] || [];
       return { u, checks: cols.map(l => hat.includes(l.toLowerCase())) };
@@ -2160,7 +2160,8 @@ registerPage('lehrgaenge', async (el) => {
       if (!datumStr || !lehrgang) { hint.textContent = 'Im Profil wird der letzte Tag (Prüfungsdatum) gespeichert'; return; }
       const end = berechneEndDatum(datumStr, tage, lehrgang);
       const [y,m,d] = end.split('-');
-      const typ = WERKTAG_LEHRGAENGE.includes(lehrgang) ? 'Werktage' : BELIEBIG_LEHRGAENGE.includes(lehrgang) ? 'Tage' : 'Wochenendtage';
+      const _art = getLehrgangsVorlage(lehrgang);
+      const typ = _art?.wochentag === 'werktag' ? 'Werktage' : _art?.wochentag === 'beliebig' ? 'Tage' : 'Wochenendtage';
       hint.textContent = `Prüfungsdatum: ${d}.${m}.${y} (${tage} ${typ})`;
     };
   };

@@ -3082,6 +3082,10 @@ window.qualiHinzufuegen = async (userId) => {
     stunden: (tage && stundenProTag) ? Math.round(tage * stundenProTag * 100) / 100 : null,
     bemerkung: document.getElementById('q-bem').value || '',
   });
+  // Maschinist-Flag auf User setzen wenn Lehrgang "Maschinist" hinzugefügt
+  if (bez.toLowerCase().includes('maschinist')) {
+    await fw.updateDoc('users/'+userId, { istMaschinist: true });
+  }
   fw.toast('Hinzugefügt'); navigate('kamerad-detail',{id:userId});
 };
 window.qualiLoeschen = async (userId, qualiId) => {
@@ -3325,10 +3329,20 @@ async function ladePruefaufgabenInline() {
     return (istUeberfaellig ? '⚠️ Nächste: ' : 'Nächste: ') + naechstes.toLocaleDateString('de-DE');
   }
 
+  // Dringlichkeit: je kleiner, desto dringlicher (negativ = überfällig)
+  function dringlichkeit(a) {
+    if (!a.letztesPruefDatum || !a.intervall) return 0;
+    const letztes = a.letztesPruefDatum.toDate ? a.letztesPruefDatum.toDate() : new Date(a.letztesPruefDatum);
+    const intervallMs = a.intervall * 30.44 * 24 * 60 * 60 * 1000;
+    const faellig = new Date(letztes.getTime() + intervallMs);
+    return faellig.getTime() - heute.getTime(); // ms bis Fälligkeit (negativ = überfällig)
+  }
+
   function aufgabenHtml(fahrzeugId) {
     const aufgaben = alleAufgaben.filter(a => a.fahrzeugId === fahrzeugId);
     if (aufgaben.length === 0) return '<p class="muted" style="font-size:0.82rem;padding:0.3rem 0">Keine Aufgaben</p>';
-    return aufgaben.filter(a => !a.ausgeblendet).map(a => `
+    const sorted = [...aufgaben.filter(a => !a.ausgeblendet)].sort((a,b) => dringlichkeit(a) - dringlichkeit(b));
+    return sorted.map(a => `
       <div style="padding:0.5rem 0;border-bottom:1px solid var(--border)">
         <div style="display:flex;align-items:flex-start;gap:0.6rem">
           <div style="width:10px;height:10px;border-radius:50%;flex-shrink:0;margin-top:0.3rem;background:${statusFarbe(a)}"></div>

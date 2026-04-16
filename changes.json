@@ -1,1 +1,1 @@
-[{"version": "20260416065101", "datum": "16.04.2026", "punkte": ["Fix: Pr\u00fcfungs-Warnung bei 10% des Intervalls (statt fix 14 Tage)"]}]
+[{"version": "20260416070937", "datum": "16.04.2026", "punkte": ["NEU: istMaschinist-Flag wird automatisch gesetzt beim Hinzuf\u00fcgen des Lehrgangs", "Fix: Pr\u00fcf-Erinnerung erkennt Maschinisten korrekt \u00fcber Flag"]}]

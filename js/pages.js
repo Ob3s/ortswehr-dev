@@ -1666,7 +1666,7 @@ registerPage('einstellungen', async (el) => {
     <div class="card">
       ${notifRow('n-einsatz', '🚨', 'Einsatzalarm', 'Bei neuen Einsätzen')}
       ${notifRow('n-dienst-reminder', '📅', 'Diensterinnerung', 'Am Morgen des Dienstes um 08:00 Uhr')}
-      ${notifRow('n-pruef-reminder', '🔧', 'Prüfintervalle', 'Am Dienst-Tag um 09:00 Uhr (nur Maschinist/Wehrführer)')}
+      ${notifRow('n-pruef-reminder', '🔧', 'Prüfintervalle', 'Am Morgen des Dienstes um 09:00 Uhr (nur Maschinisten)')}
       ${notifRow('n-news', '📰', 'Neuigkeiten', 'Bei neuen Beiträgen für meine Ortswehr')}
       ${notifRow('n-status', '⚠️', 'Status-Warnung', 'Wenn App offline oder Push nicht bereit')}
       ${fw.isWehrfuehrer() ? notifRow('n-selbst', '🧪', 'Selbst benachrichtigen', 'Nur für Tests – Wehrführer erhält eigene Alarme') : ''}

@@ -3299,8 +3299,10 @@ async function ladePruefaufgabenInline() {
     if (!a.letztesPruefDatum) return '#f59e0b';
     const letztes = a.letztesPruefDatum.toDate ? a.letztesPruefDatum.toDate() : new Date(a.letztesPruefDatum);
     if (!a.intervall) return '#94a3b8';
-    const faellig = new Date(letztes); faellig.setMonth(faellig.getMonth() + a.intervall);
-    const warnung = new Date(faellig); warnung.setDate(warnung.getDate() - 14);
+    const intervallMs = a.intervall * 30.44 * 24 * 60 * 60 * 1000; // Monate in ms
+    const faellig = new Date(letztes.getTime() + intervallMs);
+    const warnungMs = intervallMs * 0.1; // 10% des Intervalls
+    const warnung = new Date(faellig.getTime() - warnungMs);
     if (heute > faellig) return '#dc2626';
     if (heute >= warnung) return '#f59e0b';
     return '#22c55e';

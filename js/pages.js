@@ -3426,11 +3426,11 @@ window.pruefBestanden = async (id, bestanden) => {
   const label = bestanden ? 'Bestanden' : 'Nicht bestanden';
   if (!confirm(`Aufgabe als "${label}" markieren?`)) return;
   const data = { letztesPruefDatum: new Date(), bestanden };
-  if (bestanden) {
-    // Bestanden: Handlungsbedarf + Kommentar löschen
-    data.kommentar = null;
-  }
   await fw.setDoc('pruefaufgaben/'+id, data);
+  if (bestanden) {
+    // Bestanden: Kommentar separat löschen (nur wenn vorhanden)
+    try { await fw.updateDoc('pruefaufgaben/'+id, { kommentar: null }); } catch(e) {}
+  }
   fw.toast(bestanden ? 'Als bestanden markiert ✅' : 'Als nicht bestanden markiert ❌');
   ladePruefaufgabenInline();
 };

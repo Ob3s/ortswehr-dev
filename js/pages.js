@@ -2722,6 +2722,8 @@ registerPage('kameraden', async (el) => {
       const key = a.typ + (a.userId||'') + (a.pruefId||'');
       const ziel = a.typ === 'pw-reset'
         ? `pwResetDurchfuehren('${a.resetId}','${a.userId}')`
+        : (a.typ === 'pruef-fail' || a.typ === 'pruef-kommentar')
+        ? `navigiereZuFahrzeug('${a.fahrzeugId||''}')`
         : a.userId ? `navigate('kamerad-detail',{id:'${a.userId}'})`
         : `navigate('dienste')`;
       return `
@@ -2789,6 +2791,17 @@ registerPage('kameraden', async (el) => {
     navigate('kameraden');
   } catch(e) {
     fw.toast('Fehler: ' + e.message, true);
+  }
+};
+
+window.navigiereZuFahrzeug = (fahrzeugId) => {
+  navigate('dienste');
+  // Nach dem Navigieren das richtige Accordion öffnen
+  if (fahrzeugId) {
+    setTimeout(() => {
+      const el = document.querySelector(`details[data-fz-id="${fahrzeugId}"]`);
+      if (el) { el.open = true; el.scrollIntoView({ behavior: 'smooth', block: 'start' }); }
+    }, 600);
   }
 };
 

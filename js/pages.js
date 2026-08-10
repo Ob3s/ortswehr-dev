@@ -815,7 +815,7 @@ registerPage('dienste', async (el) => {
   el.innerHTML = `
     <div class="card">${renderEintragListe(liste, meineMap)}</div>
     ${(fw.isWehrfuehrer() || istMaschinist) ? `
-    <details class="card" style="margin-top:0.8rem;padding:0">
+    <details id="fz-pruef-details" class="card" style="margin-top:0.8rem;padding:0">
       <summary style="font-weight:600;cursor:pointer;list-style:none;display:flex;align-items:center;justify-content:space-between;padding:0.4rem 0.8rem;font-size:13px;border-radius:8px">
         <span>🔧 Fahrzeug- und Geräteprüfungen</span>
         <span style="color:var(--muted)">▾</span>
@@ -2795,13 +2795,17 @@ registerPage('kameraden', async (el) => {
 };
 
 window.navigiereZuFahrzeug = (fahrzeugId) => {
-  navigate('dienste');
-  // Nach dem Navigieren das richtige Accordion öffnen
+  // Falls wir bereits auf der Dienste-Seite sind, nicht neu laden – nur aufklappen/scrollen
+  const bereitsDa = !!document.getElementById('fz-pruef-details');
+  if (!bereitsDa) navigate('dienste');
+  // Nach dem (Neu-)Rendern das äußere und das richtige Fahrzeug-Accordion öffnen
   if (fahrzeugId) {
     setTimeout(() => {
+      const aussen = document.getElementById('fz-pruef-details');
+      if (aussen) aussen.open = true;
       const el = document.querySelector(`details[data-fz-id="${fahrzeugId}"]`);
       if (el) { el.open = true; el.scrollIntoView({ behavior: 'smooth', block: 'start' }); }
-    }, 600);
+    }, bereitsDa ? 0 : 600);
   }
 };
 
@@ -3392,7 +3396,7 @@ async function ladePruefaufgabenInline() {
   const dashHtml = (istWF || istMaschinist) && offene.length ? `
     <div class="card" style="border-left:3px solid #ef4444;margin-bottom:0.5rem">
       <div style="font-weight:600;font-size:0.88rem;color:#ef4444;margin-bottom:0.4rem">⚠️ ${offene.length} Aufgabe${offene.length!==1?'n':''} mit Handlungsbedarf</div>
-      ${offene.map(a => `<div style="font-size:0.82rem;padding:0.3rem 0;border-bottom:1px solid var(--border)"><div style="display:flex;align-items:center;gap:0.4rem"><span style="flex:1;font-weight:600">${a.bezeichnung}</span><button onclick="pruefKommentar('${a.id}')" style="background:none;border:none;color:#9ca3af;cursor:pointer;font-size:0.8rem;padding:0;flex-shrink:0">💬</button></div>${a.kommentar?`<div style="font-size:0.75rem;color:var(--muted);margin-top:0.1rem">${a.kommentar}</div>`:''}</div>`).join('')}
+      ${offene.map(a => `<div style="font-size:0.82rem;padding:0.3rem 0;border-bottom:1px solid var(--border);cursor:pointer" onclick="navigiereZuFahrzeug('${a.fahrzeugId||''}')"><div style="display:flex;align-items:center;gap:0.4rem"><span style="flex:1;font-weight:600">${a.bezeichnung}</span><button onclick="event.stopPropagation();pruefKommentar('${a.id}')" style="background:none;border:none;color:#9ca3af;cursor:pointer;font-size:0.8rem;padding:0;flex-shrink:0">💬</button></div>${a.kommentar?`<div style="font-size:0.75rem;color:var(--muted);margin-top:0.1rem">${a.kommentar}</div>`:''}</div>`).join('')}
     </div>` : '';
 
   // Freitext-Notiz laden

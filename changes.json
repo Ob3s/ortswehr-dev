@@ -1,1 +1,1 @@
-[{"version": "20260811104344", "datum": "11.08.2026", "punkte": ["Stundenberechnung vereinheitlicht: Kameraden-\u00dcbersicht, Statistik, Profil und Kamerad-Detail zeigen jetzt \u00fcberall dieselben (korrekten) Dienststunden", "Einsatzstunden flie\u00dfen in keine Berechnung mehr ein, werden nur noch informativ angezeigt"]}]
+[{"version": "20260811120441", "datum": "11.08.2026", "punkte": ["Fix: Alarm/Benachrichtigung bei Kameraden mit mehreren Ortswehren kam teils bei niemandem an (betraf Adrian Kotzan)"]}]

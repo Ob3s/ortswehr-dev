@@ -63,8 +63,18 @@ function kurzName(vorname, nachname) {
 }
 function anwesenheitBadge(s) {
   if (s==='bestaetigt' || s==='kommt')       return '<span style="color:#16a34a;font-size:1.1rem">✅</span>';
+  if (s==='bereitschaft')                    return '<span style="color:#2563eb;font-size:1.1rem">🏠</span>';
   if (s==='abgelehnt'  || s==='kommt_nicht') return '<span style="color:#dc2626;font-size:1.1rem">❌</span>';
   return '<span style="color:#f59e0b;font-size:1.1rem">⏳</span>'; // keine Reaktion
+}
+// Stunden-Anrechnung für eine Anwesenheit: bei Diensten immer die hinterlegte Dauer.
+// Bei Einsätzen gilt die pauschale 15-Minuten-Regel für "Bereitschaft" (in der Wache
+// geblieben, nicht ausgerückt) sowie für Einsätze ohne Endzeit (Fahrzeug ist gar nicht
+// ausgerückt – dann bekommen alle Zusagen pauschal 15 Minuten, nicht nur die, die
+// explizit auf Bereitschaft gesetzt wurden).
+function einsatzStunden(a, eintrag, istEinsatz) {
+  if (istEinsatz && (a.status === 'bereitschaft' || (eintrag && !eintrag.zeitEnde))) return 0.25;
+  return eintrag?.dauer_h ?? a.dauer_h ?? 0;
 }
 function getStats(anwesenheiten, dienstMap, einsatzMap, jahr) {
   const jetzt   = new Date();
@@ -75,13 +85,13 @@ function getStats(anwesenheiten, dienstMap, einsatzMap, jahr) {
   let gesamtEinsatz=0, dienstRelevant=0, dienstIrrelevant=0, einsaetze=0, dienste=0;
   let dienstStunden12m=0;
   for (const a of anwesenheiten) {
-    if (a.status !== 'bestaetigt' && a.status !== 'kommt') continue;
+    if (a.status !== 'bestaetigt' && a.status !== 'kommt' && a.status !== 'bereitschaft') continue;
     const dienstEintrag  = dienstMap?.get(a.uebungId)  || null;
     const einsatzEintrag = einsatzMap?.get(a.uebungId) || null;
     const eintrag   = dienstEintrag || einsatzEintrag || null;
     const typNorm   = a.typ === 'einsaetze' ? 'einsatz' : a.typ === 'dienste' ? 'dienst' : a.typ;
     const istEinsatz = typNorm === 'einsatz' || (!a.typ && !!einsatzEintrag && !dienstEintrag);
-    const h = eintrag?.dauer_h ?? a.dauer_h ?? 0;
+    const h = einsatzStunden(a, eintrag, istEinsatz);
     const d = a.datum?.toDate ? a.datum.toDate() : (eintrag?.datum?.toDate?.()  || new Date(a.datum));
     // relevant: default true, explizit false nur wenn gesetzt
     const istRelevant = eintrag?.relevant !== false;
@@ -119,7 +129,7 @@ function meineEintraegeListen(anwesenheiten, dienstMap, einsatzMap) {
 
   const diensteListe = [], einsaetzeListe = [];
   for (const a of anwesenheiten) {
-    if (a.status !== 'bestaetigt' && a.status !== 'kommt') continue;
+    if (a.status !== 'bestaetigt' && a.status !== 'kommt' && a.status !== 'bereitschaft') continue;
     const dienstEintrag  = dienstMap?.get(a.uebungId)  || null;
     const einsatzEintrag = einsatzMap?.get(a.uebungId) || null;
     const eintrag = dienstEintrag || einsatzEintrag || null;
@@ -129,7 +139,7 @@ function meineEintraegeListen(anwesenheiten, dienstMap, einsatzMap) {
     const typNorm    = a.typ === 'einsaetze' ? 'einsatz' : a.typ === 'dienste' ? 'dienst' : a.typ;
     const istEinsatz  = typNorm === 'einsatz' || (!a.typ && !!einsatzEintrag && !dienstEintrag);
     const d = a.datum?.toDate ? a.datum.toDate() : (eintrag?.datum?.toDate?.() || new Date(a.datum));
-    const h = eintrag?.dauer_h ?? a.dauer_h ?? 0;
+    const h = einsatzStunden(a, eintrag, istEinsatz);
     const titel = eintrag?.titel || a.uebungTitel || '(Details nicht mehr verfügbar)';
     const eintragObj = {
       id: a.uebungId, titel, datum: d, dauer_h: h,
@@ -870,7 +880,8 @@ registerPage('dienste', async (el) => {
     fw.getDocs('users/'+fw.user.uid+'/qualifikationen'),
   ]);
   const dQualis  = dQualiSnap.docs.map(d => d.data());
-  const zeigeFahrzeugpruefungen = fw.hatRecht('fahrzeuge_verwalten') || fw.hatRecht('fahrzeuge_pruefergebnisse');
+  const zeigeFahrzeugpruefungen = fw.hatRecht('fahrzeuge_anlegen') || fw.hatRecht('fahrzeuge_bearbeiten') || fw.hatRecht('fahrzeuge_loeschen')
+    || fw.hatRecht('pruefaufgaben_anlegen') || fw.hatRecht('pruefaufgaben_bearbeiten') || fw.hatRecht('pruefaufgaben_loeschen') || fw.hatRecht('pruefaufgaben_ergebnisse');
   const liste    = uSnap.docs.map(d => ({id:d.id,...d.data()})).filter(d => dienstSichtbar(d, fw.profil, dQualis));
   const meineMap = new Map(aSnap.docs.map(d => [d.data().uebungId, d.data().status]));
   el.innerHTML = `
@@ -1054,6 +1065,7 @@ registerPage('uebung-detail', async (el, {id, typ}) => {
         </div>
       ` : ''}
     </div>
+    <div id="einsatz-ausrueck-warnung"></div>
     <div class="section-header"><span id="einsatz-zaehler" style="font-weight:400;font-size:0.85rem"></span></div>
     <div id="einsatz-reaktionen" class="card">⏳ Lade...</div>
     <div class="card" style="display:flex;gap:0.8rem">
@@ -1132,33 +1144,62 @@ registerPage('uebung-detail', async (el, {id, typ}) => {
           a.fuehrerschein = profil.fuehrerschein || a.fuehrerschein || '';
           return a;
         });
-        const kommen      = alle.filter(a => a.status === 'kommt' || a.status === 'bestaetigt');
-        const kommenNicht = alle.filter(a => a.status === 'kommt_nicht');
-        const meineR      = alle.find(a => a.userId === fw.user.uid);
+        // "Bereitschaft" = sagt zu, bleibt aber in der Wache und rückt nicht mit dem Fahrzeug aus.
+        const kommenAusruecken   = alle.filter(a => a.status === 'kommt' || a.status === 'bestaetigt');
+        const kommenBereitschaft = alle.filter(a => a.status === 'bereitschaft');
+        const kommenAlle         = [...kommenAusruecken, ...kommenBereitschaft];
+        const kommenNicht        = alle.filter(a => a.status === 'kommt_nicht');
+        const meineR             = alle.find(a => a.userId === fw.user.uid);
 
         const normRolle = r => [...(r||'').trim().toLowerCase()]
           .map(ch => ({'ü':'ue','ö':'oe','ä':'ae','ß':'ss'}[ch]||ch)).join('');
-        const zugf  = kommen.filter(a => normRolle(a.rolle) === 'zugfuehrer').length;
-        const gruf  = kommen.filter(a => normRolle(a.rolle) === 'gruppenfuehrer').length;
-        const kamf  = kommen.filter(a => normRolle(a.rolle) !== 'zugfuehrer' && normRolle(a.rolle) !== 'gruppenfuehrer').length;
-        const agtZ  = kommen.filter(a => agtMap.get(a.userId)).length;
+        const zugf  = kommenAlle.filter(a => normRolle(a.rolle) === 'zugfuehrer').length;
+        const gruf  = kommenAlle.filter(a => normRolle(a.rolle) === 'gruppenfuehrer').length;
+        const kamf  = kommenAlle.filter(a => normRolle(a.rolle) !== 'zugfuehrer' && normRolle(a.rolle) !== 'gruppenfuehrer').length;
+        const agtZ  = kommenAlle.filter(a => agtMap.get(a.userId)).length;
         const zaehler = document.getElementById('einsatz-zaehler');
         if (zaehler) zaehler.textContent = isEinsatz
-          ? `👍 ${kommen.length}  👎 ${kommenNicht.length}  ·  Stärke: ${zugf}/${gruf}/${kamf}  ·  AGT: ${agtZ}`
-          : `👍 ${kommen.length}  👎 ${kommenNicht.length}`;
+          ? `👍 ${kommenAusruecken.length}  🏠 ${kommenBereitschaft.length}  👎 ${kommenNicht.length}  ·  Stärke: ${zugf}/${gruf}/${kamf}  ·  AGT: ${agtZ}`
+          : `👍 ${kommenAusruecken.length}  👎 ${kommenNicht.length}`;
+
+        // Kein Ausrücken möglich: entweder sind alle Zusagen auf Bereitschaft,
+        // oder niemand unter den tatsächlich Ausrückenden hat einen LKW-Führerschein (C/CE).
+        let keinAusrueckenGrund = null;
+        if (isEinsatz) {
+          if (kommenAusruecken.length === 0 && kommenBereitschaft.length > 0) {
+            keinAusrueckenGrund = 'Alle Kameraden mit Zusage sind auf Bereitschaft – niemand rückt aus';
+          } else if (kommenAusruecken.length > 0 && !kommenAusruecken.some(a => hatLkwFs(a.fuehrerschein))) {
+            keinAusrueckenGrund = 'Kein Fahrer mit Führerschein C/CE unter den Zusagen – Fahrzeug kann nicht ausrücken';
+          }
+        }
+        const warnung = document.getElementById('einsatz-ausrueck-warnung');
+        if (warnung) {
+          warnung.innerHTML = keinAusrueckenGrund
+            ? `<div class="card" style="margin-top:0.6rem;padding:0.5rem 0.7rem;background:rgba(220,38,38,0.12);border:1px solid rgba(220,38,38,0.4);border-radius:8px;color:#dc2626;font-size:0.82rem;font-weight:600">🚫 ${keinAusrueckenGrund}</div>`
+            : '';
+        }
 
         const container = document.getElementById('einsatz-reaktionen');
         if (container) {
-          const rows = [...kommen, ...kommenNicht].map(a => {
+          const rows = [...kommenAlle, ...kommenNicht].map(a => {
+            const bereitschaft = a.status === 'bereitschaft';
             const kommt = a.status === 'kommt' || a.status === 'bestaetigt';
             const lkw = kommt && hatLkwFs(a.fuehrerschein);
-            const agt = isEinsatz && kommt && agtMap.get(a.userId);
+            const agt = isEinsatz && (kommt || bereitschaft) && agtMap.get(a.userId);
+            const icon = bereitschaft ? '🏠' : (kommt ? '👍' : '👎');
+            // Bereitschaft wird erst am Gerätehaus entschieden – daher erst nachträglich
+            // umschaltbar, nicht als Erstreaktion. Eigene Zeile oder Teilnahme-Verwalter.
+            const darfUmschalten = isEinsatz && (kommt || bereitschaft) && (a.userId === fw.user.uid || fw.hatRecht(teilnRecht));
+            const umschaltBtn = !darfUmschalten ? '' : bereitschaft
+              ? `<button onclick="bereitschaftUmschalten('${a.id}','kommt')" style="background:none;cursor:pointer;font-size:0.72rem;padding:0.15rem 0.4rem;color:var(--blue);border:1px solid var(--border);border-radius:6px" title="Zurück auf Ausrücken">🚛 Ausrücken</button>`
+              : `<button onclick="bereitschaftUmschalten('${a.id}','bereitschaft')" style="background:none;cursor:pointer;font-size:0.72rem;padding:0.15rem 0.4rem;color:var(--blue);border:1px solid var(--border);border-radius:6px" title="Auf Bereitschaft setzen">🏠 Bereitschaft</button>`;
             const loeschBtn = fw.hatRecht(teilnRecht)
               ? `<button onclick="teilnehmerEntfernen('${a.id}','${id}','${u.typ}')" style="background:none;border:none;cursor:pointer;font-size:0.9rem;color:#9ca3af;padding:0.1rem 0.3rem" title="Entfernen">🗑</button>`
               : '';
             return `<div style="display:flex;align-items:center;gap:0.6rem;padding:0.4rem 0;border-bottom:1px solid var(--border)">
-              <span style="font-size:1.1rem">${kommt?'👍':'👎'}${lkw?'🚛':''}${agt?'💨':''}</span>
+              <span style="font-size:1.1rem">${icon}${lkw?'🚛':''}${agt?'💨':''}</span>
               <span style="flex:1;font-weight:${a.userId===fw.user.uid?'600':'400'}">${kurzName(usersMap.get(a.userId)?.vorname, usersMap.get(a.userId)?.nachname) || a.userName || 'Kamerad'}</span>
+              ${umschaltBtn}
               ${loeschBtn}
             </div>`;
           }).join('');
@@ -1167,10 +1208,8 @@ registerPage('uebung-detail', async (el, {id, typ}) => {
 
         const btnK  = document.getElementById('btn-kommt');
         const btnKN = document.getElementById('btn-kommt-nicht');
-        if (btnK && btnKN) {
-          btnK.style.opacity  = meineR?.status === 'kommt'       ? '1' : '0.5';
-          btnKN.style.opacity = meineR?.status === 'kommt_nicht' ? '1' : '0.5';
-        }
+        if (btnK)  btnK.style.opacity  = (meineR?.status === 'kommt' || meineR?.status === 'bereitschaft') ? '1' : '0.5';
+        if (btnKN) btnKN.style.opacity = meineR?.status === 'kommt_nicht' ? '1' : '0.5';
       },
       fw.where('uebungId','==',id)
     );
@@ -1178,6 +1217,13 @@ registerPage('uebung-detail', async (el, {id, typ}) => {
     window._einsatzListener = _einsatzListener;
   }
 });
+
+// Nachträgliches Umschalten zwischen "rückt aus" und "Bereitschaft" (bleibt in der Wache).
+// Wird erst am Gerätehaus entschieden, daher kein Teil der Erstreaktion.
+window.bereitschaftUmschalten = async (aId, neuerStatus) => {
+  await fw.updateDoc('anwesenheiten/'+aId, { status: neuerStatus });
+  fw.toast(neuerStatus === 'bereitschaft' ? 'Auf Bereitschaft gesetzt 🏠' : 'Auf Ausrücken gesetzt 🚛');
+};
 
 window.teilnahmeMelden = async (uebungId, titel, dauer_h, typ, datumStr) => {
   const name = kurzName(fw.profil.vorname, fw.profil.nachname);
@@ -1316,9 +1362,16 @@ const RECHTE_KATALOG = [
     { key: 'kameraden_lehrgaenge_verwalten',  label: 'Lehrgänge/Qualifikationen anderer verwalten' },
     { key: 'kameraden_raenge_zuweisen',       label: 'Ränge zuweisen' },
   ]},
-  { bereich: 'Fahrzeuge & Prüfaufgaben', rechte: [
-    { key: 'fahrzeuge_pruefergebnisse', label: 'Prüfergebnisse eintragen' },
-    { key: 'fahrzeuge_verwalten',       label: 'Anlegen/Bearbeiten/Löschen' },
+  { bereich: 'Fahrzeuge', rechte: [
+    { key: 'fahrzeuge_anlegen',    label: 'Anlegen' },
+    { key: 'fahrzeuge_bearbeiten', label: 'Bearbeiten' },
+    { key: 'fahrzeuge_loeschen',   label: 'Löschen' },
+  ]},
+  { bereich: 'Prüfaufgaben', rechte: [
+    { key: 'pruefaufgaben_anlegen',    label: 'Anlegen' },
+    { key: 'pruefaufgaben_bearbeiten', label: 'Bearbeiten' },
+    { key: 'pruefaufgaben_loeschen',   label: 'Löschen' },
+    { key: 'pruefaufgaben_ergebnisse', label: 'Prüfergebnisse eintragen' },
   ]},
   { bereich: 'News', rechte: [
     { key: 'news_sehen',       label: 'Sehen' },
@@ -2007,7 +2060,7 @@ registerPage('statistik', async (el) => {
   ]);
 
   const users     = usersSnap.docs.map(d => ({id:d.id,...d.data()})).filter(u => u.aktiv !== false && u.vorname);
-  const anw       = anwSnap.docs.map(d => d.data()).filter(a => a.status==='kommt' || a.status==='bestaetigt');
+  const anw       = anwSnap.docs.map(d => d.data()).filter(a => a.status==='kommt' || a.status==='bestaetigt' || a.status==='bereitschaft');
   const einsaetze = einsaetzeSnap.docs.map(d => ({id:d.id,...d.data()}));
   const dienste   = diensteSnap.docs.map(d => ({id:d.id,...d.data()}));
 
@@ -3189,7 +3242,8 @@ registerPage('kameraden', async (el) => {
   // weil hier Kameraden-, Fahrzeug- und sicherheitsrelevante Passwort-Themen zusammenlaufen)
   let aufgabenHtml = '';
   const kannKameradenAufgaben = fw.hatRecht('kameraden_stammdaten') || fw.hatRecht('kameraden_lehrgaenge_verwalten');
-  const kannFahrzeugAufgaben  = fw.hatRecht('fahrzeuge_verwalten');
+  const kannFahrzeugAufgaben  = fw.hatRecht('pruefaufgaben_ergebnisse') || fw.hatRecht('pruefaufgaben_bearbeiten')
+    || fw.hatRecht('pruefaufgaben_anlegen') || fw.hatRecht('pruefaufgaben_loeschen');
   const kannPwResetAufgaben   = fw.isWehrfuehrer(); // Passwort-Resets bleiben bewusst WF-exklusiv
   if (kannKameradenAufgaben || kannFahrzeugAufgaben || kannPwResetAufgaben) {
     const aufgaben = [];
@@ -3909,16 +3963,23 @@ async function ladePruefaufgabenInline() {
   const el = document.getElementById('pruef-inline');
   if (!el) return;
 
-  const istWF = fw.hatRecht('fahrzeuge_verwalten'); // volles Anlegen/Bearbeiten/Löschen
-  const kannPruefen = istWF || fw.hatRecht('fahrzeuge_pruefergebnisse'); // Prüfergebnisse eintragen reicht
+  // Fahrzeuge und Prüfaufgaben sind jetzt getrennte Rechte-Bereiche
+  const kannFahrzeugeAnlegen    = fw.hatRecht('fahrzeuge_anlegen');
+  const kannFahrzeugeBearbeiten = fw.hatRecht('fahrzeuge_bearbeiten');
+  const kannFahrzeugeVerwalten  = kannFahrzeugeAnlegen || kannFahrzeugeBearbeiten || fw.hatRecht('fahrzeuge_loeschen');
+  const kannPruefaufgabenAnlegen    = fw.hatRecht('pruefaufgaben_anlegen');
+  const kannPruefaufgabenBearbeiten = fw.hatRecht('pruefaufgaben_bearbeiten');
+  const kannPruefaufgabenVerwalten  = kannPruefaufgabenAnlegen || kannPruefaufgabenBearbeiten || fw.hatRecht('pruefaufgaben_loeschen');
+  const kannPruefen = kannPruefaufgabenVerwalten || fw.hatRecht('pruefaufgaben_ergebnisse'); // Prüfergebnisse eintragen reicht
+  const siehtAlleFahrzeuge = kannFahrzeugeVerwalten || kannPruefaufgabenVerwalten;
   const ortswehrId = fw.profil?.ortswehrIds?.[0] || fw.profil?.ortswehrId || null;
 
-  // Fahrzeuge laden – volles Verwalten-Recht sieht alle, sonst nur eigene Ortswehr
+  // Fahrzeuge laden – Verwalten-Rechte sehen alle, sonst nur eigene Ortswehr
   const fahrzeugSnap = await fw.getDocs('fahrzeuge', fw.orderBy('name','asc'));
   const meineWehrIdsFz = fw.profil.ortswehrIds?.length ? fw.profil.ortswehrIds : (fw.profil.ortswehrId ? [fw.profil.ortswehrId] : []);
   const fahrzeuge = fahrzeugSnap.docs
     .map(d => ({id:d.id,...d.data()}))
-    .filter(f => istWF || !f.ortswehrId || meineWehrIdsFz.includes(f.ortswehrId));
+    .filter(f => siehtAlleFahrzeuge || !f.ortswehrId || meineWehrIdsFz.includes(f.ortswehrId));
 
   // Alle Prüfaufgaben laden
   const aufgabenSnap = await fw.getDocs('pruefaufgaben', fw.orderBy('bezeichnung','asc'));
@@ -3986,7 +4047,7 @@ async function ladePruefaufgabenInline() {
             </div>
             <div style="display:flex;gap:0.2rem">
               <button class="btn btn-sm btn-secondary" style="font-size:0.7rem;padding:0.15rem 0.35rem" onclick="pruefKommentar('${a.id}')" title="Kommentar">💬</button>
-              ${istWF ? `<button class="btn btn-sm btn-secondary" style="font-size:0.7rem;padding:0.15rem 0.35rem" onclick="navigate('pruefaufgabe-form',{id:'${a.id}'})">✏️</button>` : ''}
+              ${kannPruefaufgabenBearbeiten ? `<button class="btn btn-sm btn-secondary" style="font-size:0.7rem;padding:0.15rem 0.35rem" onclick="navigate('pruefaufgabe-form',{id:'${a.id}'})">✏️</button>` : ''}
             </div>` : ''}
           </div>
         </div>
@@ -3995,7 +4056,7 @@ async function ladePruefaufgabenInline() {
 
   if (fahrzeuge.length === 0) {
     el.innerHTML = `<p class="muted" style="font-size:0.85rem">Noch keine Fahrzeuge</p>
-      ${istWF ? `<button class="btn btn-secondary btn-sm" style="margin-top:0.5rem" onclick="navigate('fahrzeug-form',{})">+ Fahrzeug hinzufügen</button>` : ''}`;
+      ${kannFahrzeugeAnlegen ? `<button class="btn btn-secondary btn-sm" style="margin-top:0.5rem" onclick="navigate('fahrzeug-form',{})">+ Fahrzeug hinzufügen</button>` : ''}`;
     return;
   }
 
@@ -4025,8 +4086,8 @@ async function ladePruefaufgabenInline() {
       <summary style="padding:0.4rem 0.8rem;cursor:pointer;list-style:none;display:flex;align-items:center;justify-content:space-between;font-weight:600;font-size:13px;border-radius:8px">
         <span>${f.name}${f.bezeichnung ? ` <span style="font-weight:400;color:var(--muted);font-size:0.8rem">(${f.bezeichnung})</span>` : ''}</span>
         <div style="display:flex;gap:0.4rem;align-items:center">
-          ${istWF ? `<button class="btn btn-sm btn-secondary" style="font-size:0.65rem;padding:0.15rem 0.4rem" onclick="event.stopPropagation();navigate('fahrzeug-form',{id:'${f.id}'})">✏️</button>
-          <button class="btn btn-sm btn-secondary" style="font-size:0.65rem;padding:0.15rem 0.4rem" onclick="event.stopPropagation();navigate('pruefaufgabe-form',{fahrzeugId:'${f.id}'})">+</button>` : ''}
+          ${kannFahrzeugeBearbeiten ? `<button class="btn btn-sm btn-secondary" style="font-size:0.65rem;padding:0.15rem 0.4rem" onclick="event.stopPropagation();navigate('fahrzeug-form',{id:'${f.id}'})">✏️</button>` : ''}
+          ${kannPruefaufgabenAnlegen ? `<button class="btn btn-sm btn-secondary" style="font-size:0.65rem;padding:0.15rem 0.4rem" onclick="event.stopPropagation();navigate('pruefaufgabe-form',{fahrzeugId:'${f.id}'})">+</button>` : ''}
           <span style="color:var(--muted)">▾</span>
         </div>
       </summary>
@@ -4038,7 +4099,7 @@ async function ladePruefaufgabenInline() {
         </div>
       </div>
     </details>`).join('') +
-    (istWF ? `<button class="btn btn-secondary btn-sm" style="margin-top:0.5rem" onclick="navigate('fahrzeug-form',{})">+ Fahrzeug hinzufügen</button>` : '');
+    (kannFahrzeugeAnlegen ? `<button class="btn btn-secondary btn-sm" style="margin-top:0.5rem" onclick="navigate('fahrzeug-form',{})">+ Fahrzeug hinzufügen</button>` : '');
 
   window.fahrzeugNotizSpeichern = async (fzId) => {
     const text = document.getElementById('notiz-'+fzId)?.value || '';
@@ -4083,7 +4144,7 @@ window.pruefAusblenden = async (id) => {
 
 // ── Fahrzeug Form ─────────────────────────────────────────
 registerPage('fahrzeug-form', async (el, {id}) => {
-  if (!fw.hatRecht('fahrzeuge_verwalten')) { el.innerHTML = '<div class="empty">Keine Berechtigung</div>'; return; }
+  if (!fw.hatRecht(id ? 'fahrzeuge_bearbeiten' : 'fahrzeuge_anlegen')) { el.innerHTML = '<div class="empty">Keine Berechtigung</div>'; return; }
   fw.setTitle(id ? 'Fahrzeug bearbeiten' : 'Neues Fahrzeug');
   fw.showBack(() => navigateBack());
 
@@ -4116,7 +4177,7 @@ registerPage('fahrzeug-form', async (el, {id}) => {
       </div>
       <div class="btn-row" style="margin-top:0.5rem">
         <button class="btn btn-primary" onclick="fahrzeugSpeichern('${id||''}')">💾 Speichern</button>
-        ${id ? `<button class="btn btn-danger" onclick="fahrzeugLoeschen('${id}')">🗑 Löschen</button>` : ''}
+        ${id && fw.hatRecht('fahrzeuge_loeschen') ? `<button class="btn btn-danger" onclick="fahrzeugLoeschen('${id}')">🗑 Löschen</button>` : ''}
       </div>
     </div>
   `;
@@ -4143,7 +4204,7 @@ window.fahrzeugLoeschen = async (id) => {
 
 // ── Prüfaufgabe Form ──────────────────────────────────────
 registerPage('pruefaufgabe-form', async (el, {id, fahrzeugId: vorFahrzeugId}) => {
-  if (!fw.hatRecht('fahrzeuge_verwalten')) { el.innerHTML = '<div class="empty">Keine Berechtigung</div>'; return; }
+  if (!fw.hatRecht(id ? 'pruefaufgaben_bearbeiten' : 'pruefaufgaben_anlegen')) { el.innerHTML = '<div class="empty">Keine Berechtigung</div>'; return; }
   fw.setTitle(id ? 'Aufgabe bearbeiten' : 'Neue Aufgabe');
   fw.showBack(() => navigateBack());
 
@@ -4176,7 +4237,7 @@ registerPage('pruefaufgabe-form', async (el, {id, fahrzeugId: vorFahrzeugId}) =>
       ${aufgabe?.ausgeblendet ? `<div style="margin-bottom:0.5rem"><button class="btn btn-secondary btn-full" onclick="pruefEinblenden('${id}')">👁 Wieder einblenden</button></div>` : ''}
       <div class="btn-row" style="margin-top:0.5rem">
         <button class="btn btn-primary" onclick="pruefaufgabeSpeichern('${id||''}')">💾 Speichern</button>
-        ${id ? `<button class="btn btn-danger" onclick="pruefaufgabeLoeschen('${id}')">🗑 Löschen</button>` : ''}
+        ${id && fw.hatRecht('pruefaufgaben_loeschen') ? `<button class="btn btn-danger" onclick="pruefaufgabeLoeschen('${id}')">🗑 Löschen</button>` : ''}
       </div>
     </div>
   `;

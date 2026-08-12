@@ -226,6 +226,20 @@ function initOrtAutocomplete(inputId, onSelect) {
   });
 }
 
+// Zählt-in-der-Einsatzstärke-als wird live aus den Lehrgängen abgeleitet, nicht mehr manuell
+// gepflegt: wer einen Zugführer- bzw. Gruppenführer-Lehrgang hat, zählt entsprechend, alle
+// anderen als Kamerad/Mannschaft.
+function staerkeKategorie(qualis) {
+  const qs = (qualis || []).map(q => (q.bezeichnung || q.titel || q.name || '').toLowerCase());
+  if (qs.some(q => q.includes('zugführer') || q.includes('zugfuehrer'))) return 'zugfuehrer';
+  if (qs.some(q => q.includes('gruppenführer') || q.includes('gruppenfuehrer'))) return 'gruppenfuehrer';
+  return 'kamerad';
+}
+async function staerkeKategorieVon(userId) {
+  const qSnap = await fw.getDocs('users/'+userId+'/qualifikationen');
+  return staerkeKategorie(qSnap.docs.map(d => d.data()));
+}
+
 // ── Dienst-Sichtbarkeit ───────────────────────────────────
 function dienstSichtbar(d, profil, qualis) {
   // Ortswehr-Filter: nur Dienste der eigenen Wehren anzeigen
@@ -247,11 +261,11 @@ function dienstSichtbar(d, profil, qualis) {
   if (titel.includes('maschinist')) {
     return qs.some(q => q.includes('maschinist'));
   }
-  // Führungskräfte
+  // Führungskräfte (Sichtbarkeit richtet sich nach der aus den Lehrgängen abgeleiteten
+  // Stärke-Kategorie, nicht mehr nach einer manuell gepflegten Rolle)
   const fuehTitel = (_dienstFilter?.fuehrung || ['führungskräfte', 'gruppenführersitzung', 'zugführersitzung', 'zug- und gruppenführer']);
   if (fuehTitel.some(t => titel.includes(t))) {
-    const rolle = profil?.rolle || '';
-    return ['gruppenführer','zugführer','wehrfuehrer'].includes(rolle);
+    return profil?.rolle === 'wehrfuehrer' || staerkeKategorie(qualis) !== 'kamerad';
   }
   return true;
 }
@@ -710,11 +724,14 @@ function renderEintrag(u, meineMap) {
   else if (istUnvollstaendig) highlightStyle = 'border-left:3px solid #f59e0b;padding-left:0.5rem;background:rgba(245,158,11,0.08);';
   const nichtRelevantBadge = ''; // nicht relevant wird nicht in der Liste angezeigt
   const artLabel = u.art ? dienstArtLabel(u.art) : '';
+  // MP-Feuer-Haken: ganz normales Recht (wie News sehen) – wer's nicht hat, sieht das Badge nicht.
+  const mpRecht = u.typ === 'einsatz' ? 'einsaetze_mp_pruefen' : 'dienste_mp_pruefen';
+  const mpGeprueft = u.mpGeprueft === true && fw.hatRecht(mpRecht);
   return `<div class="list-item" onclick="navigate('uebung-detail',{id:'${u.id}',typ:'${u.typ}'})" style="${highlightStyle}">
     <div class="list-item-body">
       <div class="list-item-title">${istHeute ? '🚨 ' : ''}${istUnvollstaendig ? '⚠️ ' : ''}${u.titel}${nichtRelevantBadge}</div>
       ${u.ort ? `<div class="list-item-sub" style="margin-top:0.05rem">📍 ${u.ort}</div>` : ''}
-      <div class="list-item-sub">${datum(u.datum)}${zeitZeile(u) ? ' · '+zeitZeile(u) : ''}${artLabel ? ' · '+artLabel : ''}${u.typ !== 'einsatz' && u.relevant !== false ? ' · <span style="color:#22c55e;font-weight:600">40h</span>' : ''}</div>
+      <div class="list-item-sub">${datum(u.datum)}${zeitZeile(u) ? ' · '+zeitZeile(u) : ''}${artLabel ? ' · '+artLabel : ''}${u.typ !== 'einsatz' && u.relevant !== false ? ' · <span style="color:#22c55e;font-weight:600">40h</span>' : ''}${mpGeprueft ? ' · <span style="color:#16a34a;font-weight:600">✔ MP</span>' : ''}</div>
       ${istUnvollstaendig ? `<div class="list-item-sub" style="color:#f59e0b;margin-top:0.1rem">⚠️ Unvollständig (Daten prüfen)</div>` : ''}
     </div>
     <div class="list-item-right">${badge}</div>
@@ -976,11 +993,6 @@ function hatLkwFs(fs) {
   return /\b(C1E|C1|CE|C)\b/.test(fs.toUpperCase());
 }
 
-window.rolleGeaendert = (rolle) => {
-  const row = document.getElementById('staerke-rolle-row');
-  if (row) row.style.display = rolle === 'wehrfuehrer' ? 'block' : 'none';
-};
-
 window.einsatzReagieren = async (uebungId, status) => {
   const name = kurzName(fw.profil.vorname, fw.profil.nachname);
   // Typ und Datum aus Quell-Collection ermitteln
@@ -992,18 +1004,17 @@ window.einsatzReagieren = async (uebungId, status) => {
     const eSnap = await fw.getDoc('einsaetze/'+uebungId);
     if (eSnap.exists()) { typ = 'einsatz'; datum = eSnap.data().datum?.toDate?.() || new Date(); dauer_h = eSnap.data().dauer_h || 0; }
   }
+  const rolle = await staerkeKategorieVon(fw.user.uid);
   const snap = await fw.getDocs('anwesenheiten',
     fw.where('uebungId','==',uebungId), fw.where('userId','==',fw.user.uid));
   if (snap.docs.length > 0) {
     await fw.updateDoc('anwesenheiten/'+snap.docs[0].id, {
-      status, typ, datum, dauer_h,
-      rolle: fw.profil.staerkeRolle || fw.profil.rolle || 'kamerad',
+      status, typ, datum, dauer_h, rolle,
       fuehrerschein: fw.profil.fuehrerschein || '', aktualisiertAm: new Date()
     });
   } else {
     await fw.addDoc('anwesenheiten', {
-      uebungId, userId: fw.user.uid, userName: name, typ, datum, dauer_h,
-      rolle: fw.profil.staerkeRolle || fw.profil.rolle || 'kamerad',
+      uebungId, userId: fw.user.uid, userName: name, typ, datum, dauer_h, rolle,
       fuehrerschein: fw.profil.fuehrerschein || '',
       status, gemeldetAm: new Date(),
     });
@@ -1027,10 +1038,15 @@ registerPage('uebung-detail', async (el, {id, typ}) => {
   const isEinsatz = u.typ === 'einsatz';
   const bearbRecht = isEinsatz ? 'einsaetze_bearbeiten' : 'dienste_bearbeiten';
   const teilnRecht = isEinsatz ? 'einsaetze_teilnahme_verwalten' : 'dienste_teilnahme_verwalten';
+  const mpRecht    = isEinsatz ? 'einsaetze_mp_pruefen' : 'dienste_mp_pruefen';
   if (!isEinsatz) await ladeDienstarten();
   fw.setTitle(isEinsatz ? 'Einsatz' : 'Dienst');
   fw.showBack(() => navigate(isEinsatz ? 'einsaetze' : 'dienste'));
   if (fw.hatRecht(bearbRecht)) fw.showHeaderAction('✏️ Edit', () => navigate('uebung-form',{id, typ: u.typ}));
+
+  // MP-Feuer-Haken: ganz normales Recht (wie News sehen) – nur für Berechtigte sichtbar.
+  const darfMp = fw.hatRecht(mpRecht);
+  const mpGeprueft = darfMp && u.mpGeprueft === true;
 
   const aSnap = await fw.getDocs('anwesenheiten',
     fw.where('uebungId','==',id), fw.where('userId','==',fw.user.uid));
@@ -1063,6 +1079,12 @@ registerPage('uebung-detail', async (el, {id, typ}) => {
           <input id="ort-inline" placeholder="Adresse eintragen…" style="flex:1;font-size:0.85rem">
           <button class="btn btn-secondary btn-sm" onclick="ortSpeichern('${u.id}')">📍 Speichern</button>
         </div>
+      ` : ''}
+      ${darfMp ? `
+        <label style="display:flex;align-items:center;gap:0.5rem;margin-top:0.6rem;cursor:pointer;font-size:0.85rem">
+          <input type="checkbox" id="mp-checkbox" ${mpGeprueft ? 'checked' : ''} onchange="mpUmschalten('${u.typ}','${id}',this.checked)">
+          In MP-Feuer überprüft
+        </label>
       ` : ''}
     </div>
     <div class="section-header"><span id="einsatz-zaehler" style="font-weight:400;font-size:0.85rem"></span></div>
@@ -1106,17 +1128,21 @@ registerPage('uebung-detail', async (el, {id, typ}) => {
 
   // Live-Listener für Reaktionen (Einsatz + Dienst)
   if (true) {
-    // usersMap + agtMap: beim Start laden und bei jedem Snapshot neu laden
-    let usersMap = new Map();
-    let agtMap   = new Map();
+    // usersMap + agtMap + staerkeMap: beim Start laden und bei jedem Snapshot neu laden
+    let usersMap   = new Map();
+    let agtMap     = new Map();
+    let staerkeMap = new Map();
     const ladeProfilDaten = async () => {
       const usersSnap = await fw.getDocs('users');
       usersMap = new Map(usersSnap.docs.map(d => [d.id, d.data()]));
-      agtMap   = new Map();
+      agtMap     = new Map();
+      staerkeMap = new Map();
       await Promise.all(usersSnap.docs.map(async d => {
         const profil = d.data();
         const qSnap = await fw.getDocs('users/'+d.id+'/qualifikationen');
-        const hatAgt = qSnap.docs.some(q => (q.data().bezeichnung||q.data().titel||q.data().name||'').toLowerCase().includes('agt'));
+        const qualis = qSnap.docs.map(q => q.data());
+        staerkeMap.set(d.id, staerkeKategorie(qualis));
+        const hatAgt = qualis.some(q => (q.bezeichnung||q.titel||q.name||'').toLowerCase().includes('agt'));
         if (!hatAgt) return;
         // AGT nur aktiv wenn alle 3 Nachweise gültig
         const heute = new Date();
@@ -1139,7 +1165,7 @@ registerPage('uebung-detail', async (el, {id, typ}) => {
         const alle = snap.docs.map(d => {
           const a = {id:d.id,...d.data()};
           const profil = usersMap.get(a.userId) || {};
-          a.rolle         = profil.staerkeRolle || profil.rolle || a.rolle || 'kamerad';
+          a.rolle         = staerkeMap.get(a.userId) || a.rolle || 'kamerad';
           a.fuehrerschein = profil.fuehrerschein || a.fuehrerschein || '';
           return a;
         });
@@ -1207,6 +1233,13 @@ window.bereitschaftUmschalten = async (aId, neuerStatus) => {
   fw.toast(neuerStatus === 'bereitschaft' ? 'Auf Bereitschaft gesetzt 🏠' : 'Auf Ausrücken gesetzt 🚛');
 };
 
+// MP-Feuer-Haken: Feld direkt auf dienste/einsaetze, wie ein ganz normales Recht (z. B. News
+// sehen) – nur wer dienste_mp_pruefen/einsaetze_mp_pruefen hat, bekommt Checkbox und Badge zu sehen.
+window.mpUmschalten = async (typ, id, geprueft) => {
+  await fw.updateDoc(col(typ)+'/'+id, { mpGeprueft: geprueft, mpGeprueftAm: new Date(), mpGeprueftVon: fw.user.uid });
+  fw.toast(geprueft ? 'In MP-Feuer überprüft ✅' : 'Haken entfernt');
+};
+
 window.teilnahmeMelden = async (uebungId, titel, dauer_h, typ, datumStr) => {
   const name = kurzName(fw.profil.vorname, fw.profil.nachname);
   await fw.addDoc('anwesenheiten', {
@@ -1252,13 +1285,16 @@ registerPage('uebung-eintragen', async (el, {id, titel, dauer, typ, datumStr}) =
 });
 
 window.direktEintragen = async (uebungId, userId, name, dauer_h, typ, datumStr) => {
-  // Profil laden damit fuehrerschein + rolle mitgespeichert werden
-  const userSnap = await fw.getDoc('users/' + userId);
+  // Profil laden damit fuehrerschein mitgespeichert wird, Stärke-Kategorie aus Lehrgängen ableiten
+  const [userSnap, rolle] = await Promise.all([
+    fw.getDoc('users/' + userId),
+    staerkeKategorieVon(userId),
+  ]);
   const profil = userSnap.exists() ? userSnap.data() : {};
   await fw.addDoc('anwesenheiten', {
     uebungId, userId, userName: name, status:'kommt',
     dauer_h, typ, datum: new Date(datumStr), bestaetigtAm: new Date(),
-    rolle: profil.staerkeRolle || profil.rolle || 'kamerad',
+    rolle,
     fuehrerschein: profil.fuehrerschein || '',
   });
   fw.toast(name+' eingetragen ✅');
@@ -1327,6 +1363,7 @@ const RECHTE_KATALOG = [
     { key: 'dienste_bearbeiten',           label: 'Bearbeiten' },
     { key: 'dienste_loeschen',             label: 'Löschen' },
     { key: 'dienste_teilnahme_verwalten',  label: 'Teilnahme anderer eintragen/löschen' },
+    { key: 'dienste_mp_pruefen',           label: 'MP-Feuer-Haken setzen (nur für Berechtigte sichtbar)' },
   ]},
   { bereich: 'Einsätze', rechte: [
     { key: 'einsaetze_anlegen',              label: 'Anlegen' },
@@ -1334,6 +1371,7 @@ const RECHTE_KATALOG = [
     { key: 'einsaetze_loeschen',             label: 'Löschen' },
     { key: 'einsaetze_teilnahme_verwalten',  label: 'Teilnahme anderer eintragen/löschen' },
     { key: 'einsaetze_alarm_ausloesen',      label: 'Alarm auslösen' },
+    { key: 'einsaetze_mp_pruefen',           label: 'MP-Feuer-Haken setzen (nur für Berechtigte sichtbar)' },
   ]},
   { bereich: 'Kameraden', rechte: [
     { key: 'kameraden_ansehen',               label: 'Namensliste ansehen' },
@@ -3782,20 +3820,11 @@ registerPage('kamerad-form', async (el, {id}) => {
       </div>
       ${fw.isWehrfuehrer() ? `
       <div class="form-row"><label>Rolle</label>
-        <select id="k-rolle" onchange="rolleGeaendert(this.value)">
-          <option value="kamerad" ${u?.rolle==='kamerad'?'selected':''}>Kamerad</option>
-          <option value="gruppenfuehrer" ${u?.rolle==='gruppenfuehrer'?'selected':''}>Gruppenführer</option>
-          <option value="zugfuehrer" ${u?.rolle==='zugfuehrer'?'selected':''}>Zugführer</option>
-          <option value="wehrfuehrer" ${u?.rolle==='wehrfuehrer'?'selected':''}>Wehrführer</option>
+        <select id="k-rolle">
+          <option value="kamerad" ${u?.rolle!=='wehrfuehrer'?'selected':''}>Kamerad</option>
+          <option value="wehrfuehrer" ${u?.rolle==='wehrfuehrer'?'selected':''}>Administrator</option>
         </select>
-        <div id="staerke-rolle-row" style="display:${u?.rolle==='wehrfuehrer'?'block':'none'};margin-top:0.5rem">
-          <label style="font-size:0.82rem;color:var(--muted)">Zählt in der Einsatzstärke als</label>
-          <select id="k-staerke-rolle">
-            <option value="kamerad" ${(u?.staerkeRolle||'kamerad')==='kamerad'?'selected':''}>Kamerad</option>
-            <option value="gruppenfuehrer" ${u?.staerkeRolle==='gruppenfuehrer'?'selected':''}>Gruppenführer</option>
-            <option value="zugfuehrer" ${u?.staerkeRolle==='zugfuehrer'?'selected':''}>Zugführer</option>
-          </select>
-        </div>
+        <div class="muted" style="font-size:0.75rem;margin-top:0.3rem">Technisches Sicherheitsnetz mit Vollzugriff, unabhängig vom Rang. Die tatsächliche Funktion (z. B. Wehrführer, Gruppenführer, Zugführer) wird über Rang und Lehrgänge abgebildet.</div>
       </div>` : ''}
       ${fw.hatRecht('kameraden_raenge_zuweisen') ? `
       <div class="form-row"><label>Rang</label>
@@ -3850,12 +3879,8 @@ window.kameradSpeichern = async (id) => {
   const rolleEl = document.getElementById('k-rolle');
   if (rolleEl) {
     data.rolle = rolleEl.value;
-    data.staerkeRolle = rolleEl.value === 'wehrfuehrer'
-      ? (document.getElementById('k-staerke-rolle')?.value || 'kamerad')
-      : rolleEl.value;
   } else if (!id) {
     data.rolle = 'kamerad'; // Neuanlage ohne Rolle-Feld (kein WF) -> sicherer Standard
-    data.staerkeRolle = 'kamerad';
   }
   // Rang nur anfassen, wenn das Feld angezeigt wurde (Recht 'Ränge zuweisen')
   const rangEl = document.getElementById('k-rang');

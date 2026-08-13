@@ -85,7 +85,8 @@ function getStats(anwesenheiten, dienstMap, einsatzMap, jahr) {
   const vor12m  = new Date(); vor12m.setFullYear(jetzt.getFullYear()-1); vor12m.setHours(0,0,0,0);
 
   let gesamtEinsatz=0, dienstRelevant=0, dienstIrrelevant=0, einsaetze=0, dienste=0;
-  let dienstStunden12m=0;
+  let dienstRelevantAnzahl=0, dienstIrrelevantAnzahl=0;
+  let dienstStunden12m=0, dienste12m=0;
   for (const a of anwesenheiten) {
     if (a.status !== 'bestaetigt' && a.status !== 'kommt' && a.status !== 'bereitschaft') continue;
     const dienstEintrag  = dienstMap?.get(a.uebungId)  || null;
@@ -103,10 +104,10 @@ function getStats(anwesenheiten, dienstMap, einsatzMap, jahr) {
     } else {
       if (d.getFullYear() === jahrAkt) {
         dienste++;
-        if (istRelevant) dienstRelevant += h;
-        else             dienstIrrelevant += h;
+        if (istRelevant) { dienstRelevant += h; dienstRelevantAnzahl++; }
+        else             { dienstIrrelevant += h; dienstIrrelevantAnzahl++; }
       }
-      if (d >= vor12m && istRelevant) dienstStunden12m += h;
+      if (d >= vor12m && istRelevant) { dienstStunden12m += h; dienste12m++; }
     }
   }
   const gesamtDienst = dienstRelevant + dienstIrrelevant;
@@ -115,7 +116,9 @@ function getStats(anwesenheiten, dienstMap, einsatzMap, jahr) {
     gesamtDienst:     Math.round(gesamtDienst*10)/10,
     dienstRelevant:   Math.round(dienstRelevant*10)/10,
     dienstIrrelevant: Math.round(dienstIrrelevant*10)/10,
+    dienstRelevantAnzahl, dienstIrrelevantAnzahl,
     einsaetze, dienste,
+    dienste12m,       // Anzahl relevanter Dienste im rollierenden 12-Monats-Fenster (passend zu stunden12mZiel)
     stunden12m:       Math.round(dienstRelevant*10)/10,  // aktuelles Jahr, nur relevante
     ziel:             dienstStunden12m >= 40,
     stunden12mZiel:   Math.round(dienstStunden12m*10)/10,
@@ -231,15 +234,23 @@ function initOrtAutocomplete(inputId, onSelect) {
 // Zählt-in-der-Einsatzstärke-als wird live aus den Lehrgängen abgeleitet, nicht mehr manuell
 // gepflegt: wer einen Zugführer- bzw. Gruppenführer-Lehrgang hat, zählt entsprechend, alle
 // anderen als Kamerad/Mannschaft.
-function staerkeKategorie(qualis) {
-  const qs = (qualis || []).map(q => (q.bezeichnung || q.titel || q.name || '').toLowerCase());
+// Optionaler Stichtag: zählt nur Lehrgänge, deren Prüfungsdatum (qualis[].datum) bis zu diesem
+// Zeitpunkt bereits erreicht war. Wichtig für historische Auswertungen (z. B. Stärke eines alten
+// Einsatzes) – sonst würde dort die HEUTIGE Qualifikation angezeigt, nicht die damalige (Bug: alte
+// Einsätze zeigten Kameraden rückwirkend schon als Gruppen-/Zugführer, obwohl sie das zum
+// Einsatzzeitpunkt noch nicht waren). Ohne Stichtag (Standardfall, z. B. Dashboard/aktueller
+// Status) bleibt das Verhalten wie bisher: alle vorhandenen Lehrgänge zählen.
+function staerkeKategorie(qualis, stichtag) {
+  const grenze = stichtag ? new Date(stichtag) : null;
+  const relevante = (qualis || []).filter(q => !grenze || (q.datum && new Date(q.datum) <= grenze));
+  const qs = relevante.map(q => (q.bezeichnung || q.titel || q.name || '').toLowerCase());
   if (qs.some(q => q.includes('zugführer') || q.includes('zugfuehrer'))) return 'zugfuehrer';
   if (qs.some(q => q.includes('gruppenführer') || q.includes('gruppenfuehrer'))) return 'gruppenfuehrer';
   return 'kamerad';
 }
-async function staerkeKategorieVon(userId) {
+async function staerkeKategorieVon(userId, stichtag) {
   const qSnap = await fw.getDocs('users/'+userId+'/qualifikationen');
-  return staerkeKategorie(qSnap.docs.map(d => d.data()));
+  return staerkeKategorie(qSnap.docs.map(d => d.data()), stichtag);
 }
 
 // ── Dienst-Sichtbarkeit ───────────────────────────────────
@@ -730,16 +741,22 @@ function renderEintrag(u, meineMap) {
   if (istHeute) highlightStyle = 'border-left:3px solid var(--red);padding-left:0.5rem;background:rgba(220,38,38,0.08);';
   const nichtRelevantBadge = ''; // nicht relevant wird nicht in der Liste angezeigt
   const artLabel = u.art ? dienstArtLabel(u.art) : '';
-  // MP-Feuer-Haken: ganz normales Recht (wie News sehen) – wer's nicht hat, sieht das Badge nicht.
+  // MP-Feuer-Haken: ganz normales Recht (wie News sehen) – wer's nicht hat, sieht weder Status noch Knopf.
+  // Zusätzlich zur Checkbox im Detail gibt's hier einen direkten Umschalt-Knopf in der Übersicht,
+  // damit man nicht für jeden einzelnen Eintrag extra ins Detail muss.
   const mpRecht = u.typ === 'einsatz' ? 'einsaetze_mp_pruefen' : 'dienste_mp_pruefen';
-  const mpGeprueft = u.mpGeprueft === true && fw.hatRecht(mpRecht);
+  const darfMp = fw.hatRecht(mpRecht);
+  const mpGeprueft = u.mpGeprueft === true;
+  const mpBtnStyle = mpGeprueft ? 'background:rgba(22,163,74,0.12);border:1px solid rgba(22,163,74,0.4);color:#16a34a;' : '';
+  const mpBtn = darfMp ? `<button type="button" class="btn btn-sm btn-secondary" style="margin-top:0.3rem;font-size:0.68rem;padding:0.15rem 0.55rem;white-space:nowrap;${mpBtnStyle}"
+      onclick="event.stopPropagation();mpUmschaltenListe(this,'${u.typ}','${u.id}',${!mpGeprueft})">${mpGeprueft ? '✔ MP geprüft' : '☐ MP prüfen'}</button>` : '';
   return `<div class="list-item" onclick="navigate('uebung-detail',{id:'${u.id}',typ:'${u.typ}'})" style="${highlightStyle}">
     <div class="list-item-body">
       <div class="list-item-title">${istHeute ? '🚨 ' : ''}${istUnvollstaendig ? '⚠️ ' : ''}${u.titel}${nichtRelevantBadge}</div>
       ${u.ort ? `<div class="list-item-sub" style="margin-top:0.05rem">📍 ${u.ort}</div>` : ''}
-      <div class="list-item-sub">${datum(u.datum)}${zeitZeile(u) ? ' · '+zeitZeile(u) : ''}${artLabel ? ' · '+artLabel : ''}${u.typ !== 'einsatz' && u.relevant !== false ? ' · <span style="color:#22c55e;font-weight:600">40h</span>' : ''}${mpGeprueft ? ' · <span style="color:#16a34a;font-weight:600">✔ MP</span>' : ''}</div>
+      <div class="list-item-sub">${datum(u.datum)}${zeitZeile(u) ? ' · '+zeitZeile(u) : ''}${artLabel ? ' · '+artLabel : ''}${u.typ !== 'einsatz' && u.relevant !== false ? ' · <span style="color:#22c55e;font-weight:600">40h</span>' : ''}</div>
     </div>
-    <div class="list-item-right">${badge}</div>
+    <div class="list-item-right" style="display:flex;flex-direction:column;align-items:flex-end;gap:0.1rem">${badge}${mpBtn}</div>
     <div class="list-chevron">›</div>
   </div>`;
 }
@@ -920,15 +937,26 @@ registerPage('dienste', async (el) => {
     <div style="margin-top:0.8rem">
       <button class="btn btn-secondary btn-sm btn-full" onclick="kalenderImportieren()" id="kal-btn">📅 Aus Google Kalender importieren</button>
       <div id="kal-status" class="muted" style="font-size:0.8rem;text-align:center;margin-top:0.4rem"></div>
+      <div id="kal-vorschau"></div>
     </div>` : ''}
   `;
   if (zeigeFahrzeugpruefungen) ladePruefaufgabenInline();
 });
 
+// Kalender-Import: lädt die Events NUR und zeigt sie zur Kontrolle an (kal-vorschau) – es wird
+// nichts automatisch in Firestore geschrieben. Erst mit "Ausgewählte übernehmen"
+// (kalenderImportUebernehmen) werden die angehakten Einträge tatsächlich angelegt/aktualisiert.
+// Grund: der Import kam bisher 1:1 durch, inkl. stillem Überschreiben bereits bearbeiteter Dienste
+// bei abweichenden Kerndaten – das soll jetzt sichtbar und bewusst passieren.
+let _kalVorschauDaten = null;
+
 window.kalenderImportieren = async () => {
-  const btn    = document.getElementById('kal-btn');
-  const status = document.getElementById('kal-status');
+  const btn      = document.getElementById('kal-btn');
+  const status   = document.getElementById('kal-status');
+  const vorschau = document.getElementById('kal-vorschau');
   btn.disabled = true; btn.textContent = '⏳ Wird geladen...';
+  status.textContent = '';
+  vorschau.innerHTML = '';
   try {
     const res = await fetch('https://europe-west3-ffw-oegeln-791ca.cloudfunctions.net/kalenderImport',
       { headers: { 'x-uid': fw.user.uid } });
@@ -937,59 +965,130 @@ window.kalenderImportieren = async () => {
 
     // Bestehende Dienste laden – Matching per Datum (YYYY-MM-DD)
     const snap = await fw.getDocs('dienste');
-    // Map: datum-String → {id, data}
     const vorhandeneMap = new Map(snap.docs.map(d => [
       d.data().datum?.toDate?.().toISOString().slice(0,10),
       { id: d.id, data: d.data() }
     ]));
 
-    let neu = 0, aktualisiert = 0, unveraendert = 0;
-    for (const e of events) {
+    // Nur klassifizieren (neu / geändert / unverändert), NICHT schreiben.
+    _kalVorschauDaten = events.map(e => {
       const bestehend = vorhandeneMap.get(e.datum);
-      const neuerEintrag = {
-        titel: e.titel, datum: new Date(e.datum),
-        dauer_h: e.dauer_h, beschreibung: e.beschreibung || '',
-        zeitBeginn: e.zeitBeginn || null, zeitEnde: e.zeitEnde || null,
-        ort: e.ort || null, typ: 'dienst',
-      };
+      if (!bestehend) return { ...e, status: 'neu' };
+      const alt = bestehend.data;
+      const diffs = [];
+      if (alt.titel !== e.titel) diffs.push(`Titel: "${alt.titel}" → "${e.titel}"`);
+      if ((alt.ort || '') !== (e.ort || '')) diffs.push(`Ort: "${alt.ort || '–'}" → "${e.ort || '–'}"`);
+      if ((alt.zeitBeginn || '') !== (e.zeitBeginn || '') || (alt.zeitEnde || '') !== (e.zeitEnde || ''))
+        diffs.push(`Zeit: ${alt.zeitBeginn || '–'}–${alt.zeitEnde || '–'} → ${e.zeitBeginn || '–'}–${e.zeitEnde || '–'} Uhr`);
+      if (Math.abs((alt.dauer_h || 0) - (e.dauer_h || 0)) > 0.01)
+        diffs.push(`Dauer: ${alt.dauer_h || 0}h → ${e.dauer_h || 0}h`);
+      if (!diffs.length) return { ...e, status: 'unveraendert' };
+      return { ...e, status: 'geaendert', diffs, bestehendId: bestehend.id };
+    });
 
-      if (!bestehend) {
-        // Neu anlegen
-        await fw.addDoc('dienste', { ...neuerEintrag, erstelltVon: fw.user.uid, erstelltAm: new Date() });
-        neu++;
-      } else {
-        // Prüfen ob sich Kerndaten geändert haben
-        const alt = bestehend.data;
-        const geaendert =
-          alt.titel !== e.titel ||
-          (alt.ort || '') !== (e.ort || '') ||
-          (alt.zeitBeginn || '') !== (e.zeitBeginn || '') ||
-          (alt.zeitEnde || '') !== (e.zeitEnde || '') ||
-          Math.abs((alt.dauer_h || 0) - (e.dauer_h || 0)) > 0.01;
-
-        if (geaendert) {
-          // Nur Kerndaten updaten – Anwesenheiten bleiben unberührt
-          await fw.setDoc('dienste/' + bestehend.id, neuerEintrag);
-          aktualisiert++;
-        } else {
-          unveraendert++;
-        }
-      }
-    }
-
-    const teile = [];
-    if (neu > 0)          teile.push(neu + ' neu');
-    if (aktualisiert > 0) teile.push(aktualisiert + ' aktualisiert');
-    if (unveraendert > 0) teile.push(unveraendert + ' unverändert');
-    status.textContent = teile.join(' · ');
+    const neuListe         = _kalVorschauDaten.filter(e => e.status === 'neu');
+    const geaendertListe   = _kalVorschauDaten.filter(e => e.status === 'geaendert');
+    const unveraendertListe = _kalVorschauDaten.filter(e => e.status === 'unveraendert');
     btn.textContent = '📅 Aus Google Kalender importieren';
     btn.disabled = false;
-    if (neu > 0 || aktualisiert > 0) setTimeout(() => navigate('dienste'), 1200);
+
+    if (!neuListe.length && !geaendertListe.length) {
+      status.textContent = `Keine Änderungen (${unveraendertListe.length} bereits unverändert vorhanden)`;
+      _kalVorschauDaten = null;
+      return;
+    }
+
+    const aktionable = _kalVorschauDaten
+      .map((e, idx) => ({ ...e, idx }))
+      .filter(e => e.status !== 'unveraendert');
+
+    vorschau.innerHTML = `
+      <div class="card" style="margin-top:0.6rem">
+        <div style="font-weight:600;margin-bottom:0.3rem">📅 Kalender-Vorschau</div>
+        <div class="muted" style="font-size:0.78rem;margin-bottom:0.5rem">
+          ${neuListe.length} neu · ${geaendertListe.length} geändert · ${unveraendertListe.length} unverändert (nicht angezeigt) –
+          bitte prüfen, was übernommen werden soll (⚠️ "Geändert" überschreibt einen bestehenden Dienst).
+        </div>
+        <div>${aktionable.map(e => kalEventZeile(e, e.idx)).join('')}</div>
+        <div style="display:flex;gap:0.5rem;margin-top:0.7rem">
+          <button class="btn btn-primary btn-sm" style="flex:1" onclick="kalenderImportUebernehmen()">✅ Ausgewählte übernehmen</button>
+          <button class="btn btn-secondary btn-sm" onclick="kalenderImportAbbrechen()">Abbrechen</button>
+        </div>
+      </div>`;
   } catch(e) {
     status.textContent = 'Fehler: ' + e.message;
     btn.textContent = '📅 Aus Google Kalender importieren';
     btn.disabled = false;
   }
+};
+
+// Eine Zeile der Kalender-Vorschau: "neu" ist standardmäßig angehakt (unkritisch, legt nur neu an),
+// "geändert" ist standardmäßig NICHT angehakt, weil es einen bestehenden Dienst überschreibt – der
+// Nutzer muss das bewusst anhaken, nachdem er den Diff darunter gelesen hat.
+function kalEventZeile(ev, idx) {
+  const istNeu  = ev.status === 'neu';
+  const icon    = istNeu ? '🆕' : '✏️';
+  const label   = istNeu ? 'Neu' : 'Geändert';
+  const farbe   = istNeu ? '#16a34a' : '#f59e0b';
+  const checked = istNeu ? 'checked' : '';
+  const diffHtml = ev.diffs?.length
+    ? `<div style="font-size:0.75rem;color:var(--muted);margin-top:0.25rem">${ev.diffs.map(d => `<div>${d}</div>`).join('')}</div>`
+    : '';
+  return `<label style="display:flex;align-items:flex-start;gap:0.6rem;padding:0.55rem 0;border-bottom:1px solid var(--border);cursor:pointer">
+    <input type="checkbox" id="kal-cb-${idx}" ${checked} style="margin-top:0.2rem;flex-shrink:0">
+    <div style="flex:1;min-width:0">
+      <div style="font-weight:600;font-size:0.88rem">${ev.titel}</div>
+      <div style="font-size:0.78rem;color:var(--muted);margin-top:0.1rem">${datum(ev.datum)}${ev.zeitBeginn ? ' · '+ev.zeitBeginn+(ev.zeitEnde ? '–'+ev.zeitEnde : '')+' Uhr' : ''}${ev.ort ? ' · '+ev.ort : ''} · <span style="color:${farbe};font-weight:600">${icon} ${label}</span></div>
+      ${diffHtml}
+    </div>
+  </label>`;
+}
+
+// Schreibt nur die in der Vorschau angehakten Einträge nach Firestore.
+window.kalenderImportUebernehmen = async () => {
+  if (!_kalVorschauDaten) return;
+  const btn = document.querySelector('#kal-vorschau .btn-primary');
+  if (btn) { btn.disabled = true; btn.textContent = '⏳ Wird übernommen...'; }
+  try {
+    let neu = 0, aktualisiert = 0;
+    for (let idx = 0; idx < _kalVorschauDaten.length; idx++) {
+      const ev = _kalVorschauDaten[idx];
+      if (ev.status === 'unveraendert') continue;
+      const cb = document.getElementById('kal-cb-'+idx);
+      if (!cb || !cb.checked) continue;
+      const eintrag = {
+        titel: ev.titel, datum: new Date(ev.datum),
+        dauer_h: ev.dauer_h, beschreibung: ev.beschreibung || '',
+        zeitBeginn: ev.zeitBeginn || null, zeitEnde: ev.zeitEnde || null,
+        ort: ev.ort || null, typ: 'dienst',
+      };
+      if (ev.status === 'neu') {
+        await fw.addDoc('dienste', { ...eintrag, erstelltVon: fw.user.uid, erstelltAm: new Date() });
+        neu++;
+      } else {
+        // Merge statt Overwrite (fw.setDoc nutzt { merge: true }) – andere Felder wie Art,
+        // Bemerkung oder MP-Haken bleiben unberührt, Anwesenheiten sowieso.
+        await fw.setDoc('dienste/' + ev.bestehendId, eintrag);
+        aktualisiert++;
+      }
+    }
+    const teile = [];
+    if (neu > 0)          teile.push(neu + ' neu');
+    if (aktualisiert > 0) teile.push(aktualisiert + ' aktualisiert');
+    document.getElementById('kal-status').textContent = teile.length ? teile.join(' · ') : 'Nichts ausgewählt';
+    document.getElementById('kal-vorschau').innerHTML = '';
+    _kalVorschauDaten = null;
+    if (neu > 0 || aktualisiert > 0) setTimeout(() => navigate('dienste'), 1200);
+  } catch(e) {
+    fw.toast('Fehler: ' + e.message, true);
+    if (btn) { btn.disabled = false; btn.textContent = '✅ Ausgewählte übernehmen'; }
+  }
+};
+
+window.kalenderImportAbbrechen = () => {
+  document.getElementById('kal-vorschau').innerHTML = '';
+  document.getElementById('kal-status').textContent = '';
+  _kalVorschauDaten = null;
 };
 
 
@@ -1157,6 +1256,10 @@ registerPage('uebung-detail', async (el, {id, typ}) => {
     let usersMap   = new Map();
     let agtMap     = new Map();
     let staerkeMap = new Map();
+    // Stichtag für Stärke-/AGT-Berechnung: das Datum DIESES Einsatzes/Dienstes, nicht "heute" –
+    // sonst zeigen alte Einsätze rückwirkend die aktuelle Qualifikation der Kameraden an, statt
+    // die, die sie zum Zeitpunkt des Einsatzes tatsächlich hatten.
+    const bezugsDatum = u.datum?.toDate ? u.datum.toDate() : new Date(u.datum);
     const ladeProfilDaten = async () => {
       const usersSnap = await fw.getDocs('users');
       usersMap = new Map(usersSnap.docs.map(d => [d.id, d.data()]));
@@ -1166,17 +1269,22 @@ registerPage('uebung-detail', async (el, {id, typ}) => {
         const profil = d.data();
         const qSnap = await fw.getDocs('users/'+d.id+'/qualifikationen');
         const qualis = qSnap.docs.map(q => q.data());
-        staerkeMap.set(d.id, staerkeKategorie(qualis));
-        const hatAgt = qualis.some(q => (q.bezeichnung||q.titel||q.name||'').toLowerCase().includes('agt'));
+        staerkeMap.set(d.id, staerkeKategorie(qualis, bezugsDatum));
+        const hatAgt = qualis.some(q => {
+          const bez = (q.bezeichnung||q.titel||q.name||'').toLowerCase();
+          return bez.includes('agt') && (!q.datum || new Date(q.datum) <= bezugsDatum);
+        });
         if (!hatAgt) return;
-        // AGT nur aktiv wenn alle 3 Nachweise gültig
-        const heute = new Date();
-        const j3 = new Date(); j3.setFullYear(heute.getFullYear()-3); j3.setHours(0,0,0,0);
-        const j1 = new Date(); j1.setFullYear(heute.getFullYear()-1); j1.setHours(0,0,0,0);
+        // AGT nur aktiv, wenn alle 3 Nachweise zum Bezugsdatum bereits erbracht (nicht erst danach)
+        // und noch gültig waren (G26 ≤ 3 Jahre, Übungen ≤ 1 Jahr vor dem Bezugsdatum).
+        const j3 = new Date(bezugsDatum); j3.setFullYear(bezugsDatum.getFullYear()-3); j3.setHours(0,0,0,0);
+        const j1 = new Date(bezugsDatum); j1.setFullYear(bezugsDatum.getFullYear()-1); j1.setHours(0,0,0,0);
         const unt  = profil.agt_untersuchung ? new Date(profil.agt_untersuchung) : null;
         const waer = profil.agt_waermeuebung ? new Date(profil.agt_waermeuebung) : null;
         const bel  = profil.agt_belastung    ? new Date(profil.agt_belastung)    : null;
-        const agtAktiv = unt && unt >= j3 && waer && waer >= j1 && bel && bel >= j1;
+        const agtAktiv = unt && unt <= bezugsDatum && unt >= j3
+          && waer && waer <= bezugsDatum && waer >= j1
+          && bel && bel <= bezugsDatum && bel >= j1;
         if (agtAktiv) agtMap.set(d.id, true);
       }));
     };
@@ -1296,6 +1404,20 @@ window.pruefeBereitschaftAutoEndzeit = async (uebungId) => {
 window.mpUmschalten = async (typ, id, geprueft) => {
   await fw.updateDoc(col(typ)+'/'+id, { mpGeprueft: geprueft, mpGeprueftAm: new Date(), mpGeprueftVon: fw.user.uid });
   fw.toast(geprueft ? 'In MP-Feuer überprüft ✅' : 'Haken entfernt');
+};
+
+// Direkter Umschalt-Knopf in der Übersicht (renderEintrag): ruft dieselbe Firestore-Logik wie die
+// Detail-Checkbox auf, aktualisiert danach nur den eigenen Knopf statt die ganze Liste neu zu laden.
+window.mpUmschaltenListe = async (btn, typ, id, geprueft) => {
+  btn.disabled = true;
+  try {
+    await mpUmschalten(typ, id, geprueft);
+    btn.textContent = geprueft ? '✔ MP geprüft' : '☐ MP prüfen';
+    btn.style.cssText = `margin-top:0.3rem;font-size:0.68rem;padding:0.15rem 0.55rem;white-space:nowrap;${geprueft ? 'background:rgba(22,163,74,0.12);border:1px solid rgba(22,163,74,0.4);color:#16a34a;' : ''}`;
+    btn.setAttribute('onclick', `event.stopPropagation();mpUmschaltenListe(this,'${typ}','${id}',${!geprueft})`);
+  } finally {
+    btn.disabled = false;
+  }
 };
 
 // Bemerkung: Feld direkt auf dienste/einsaetze, wie ein ganz normales Recht – nur wer
@@ -1881,10 +2003,9 @@ registerPage('profil', async (el) => {
       </div>
     </div>
     <div class="stats-grid">
-      <div class="stat-card"><div class="stat-zahl">${dauerFormat(stats.dienstRelevant)}h</div><div class="stat-label">Dienststunden ${new Date().getFullYear()}</div></div>
-      <div class="stat-card"><div class="stat-zahl">${stats.dienste}</div><div class="stat-label">${stats.dienste===1?'Dienst':'Dienste'} ${new Date().getFullYear()}</div></div>
+      <div class="stat-card"><div class="stat-zahl">${dauerFormat(stats.dienstRelevant)}h</div><div class="stat-count">${stats.dienstRelevantAnzahl} ${stats.dienstRelevantAnzahl===1?'Dienst':'Dienste'}</div><div class="stat-label">Dienststunden ${new Date().getFullYear()}</div></div>
       <div class="stat-card"><div class="stat-zahl">${dauerFormat(stats.gesamtEinsatz)}h</div><div class="stat-label">Einsatzstunden ${new Date().getFullYear()}</div></div>
-      <div class="stat-card"><div class="stat-zahl">${stats.einsaetze}</div><div class="stat-label">${stats.einsaetze===1?'Einsatz':'Einsätze'} ${new Date().getFullYear()}</div></div>
+      <div class="stat-card wide"><div class="stat-zahl">${stats.einsaetze}</div><div class="stat-label">${stats.einsaetze===1?'Einsatz':'Einsätze'} ${new Date().getFullYear()}</div></div>
     </div>
 
     <details class="card" style="padding:0">
@@ -2690,8 +2811,20 @@ registerPage('dienstart-form', async (el, {id}) => {
     const doppelt = _dienstarten.some(a => a.id !== artId && a.bezeichnung.toLowerCase() === bez.toLowerCase());
     if (doppelt) { fw.toast('Diese Bezeichnung gibt es bereits', true); return; }
     const relevant = document.getElementById('da-relevant').checked;
+    let toastText = 'Gespeichert ✅';
     if (artId) {
+      const vorher = _dienstarten.find(a => a.id === artId);
       await fw.updateDoc('dienstarten/'+artId, { bezeichnung: bez, relevant });
+      // Die 40h-Zugehörigkeit war bisher nur auf jedem einzelnen Dienst als Kopie gespeichert
+      // (relevant), die beim Anlegen aus der Dienst-Art übernommen wurde – eine spätere Änderung
+      // der Dienst-Art wirkte sich dadurch NICHT auf schon bestehende Dienste aus (gemeldeter Bug).
+      // Deshalb hier bei geänderter Einstufung alle bestehenden Dienste dieser Art nachziehen.
+      if (vorher && vorher.relevant !== relevant) {
+        const dSnap = await fw.getDocs('dienste', fw.where('art','==',artId));
+        const betroffen = dSnap.docs.filter(d => d.data().relevant !== relevant);
+        await Promise.all(betroffen.map(d => fw.updateDoc('dienste/'+d.id, { relevant })));
+        if (betroffen.length) toastText = `Gespeichert ✅ (${betroffen.length} bestehende Dienste angepasst)`;
+      }
     } else {
       // Fortlaufende numerische ID vergeben, unabhängig von der Bezeichnung
       const maxId = _dienstarten.reduce((max, a) => Math.max(max, parseInt(a.id) || 0), 0);
@@ -2700,7 +2833,7 @@ registerPage('dienstart-form', async (el, {id}) => {
     }
     _dienstartenGeladen = false;
     await ladeDienstarten();
-    fw.toast('Gespeichert ✅');
+    fw.toast(toastText);
     navigate('dienstarten-verwalten');
   };
 
@@ -3509,7 +3642,7 @@ registerPage('kameraden', async (el) => {
     const erreicht = h >= ZIEL;
     const farbe = erreicht ? '#22c55e' : h >= ZIEL * 0.75 ? '#f59e0b' : 'var(--muted)';
     return `<div style="text-align:right;min-width:64px">
-      <div style="font-size:0.8rem;font-weight:600;color:${farbe}">${h}h</div>
+      <div style="font-size:0.8rem;font-weight:600;color:${farbe}">${h}h <span style="font-size:0.68rem;font-weight:500;color:var(--muted)">· ${stats.dienste12m}</span></div>
       <div style="background:var(--border);border-radius:3px;height:4px;width:64px;margin-top:3px">
         <div style="background:${farbe};width:${pct}%;height:4px;border-radius:3px"></div>
       </div>
@@ -3942,8 +4075,8 @@ registerPage('kamerad-detail', async (el, {id}) => {
       </div>
     </div>
     <div class="stats-grid">
-      <div class="stat-card"><div class="stat-zahl">${dauerFormat(stats.dienstRelevant)}h</div><div class="stat-label">Dienste (relevant) ${new Date().getFullYear()}</div></div>
-      <div class="stat-card"><div class="stat-zahl">${dauerFormat(stats.dienstIrrelevant)}h</div><div class="stat-label">Dienste (nicht relevant) ${new Date().getFullYear()}</div></div>
+      <div class="stat-card"><div class="stat-zahl">${dauerFormat(stats.dienstRelevant)}h</div><div class="stat-count">${stats.dienstRelevantAnzahl} ${stats.dienstRelevantAnzahl===1?'Dienst':'Dienste'}</div><div class="stat-label">Dienste (relevant) ${new Date().getFullYear()}</div></div>
+      <div class="stat-card"><div class="stat-zahl">${dauerFormat(stats.dienstIrrelevant)}h</div><div class="stat-count">${stats.dienstIrrelevantAnzahl} ${stats.dienstIrrelevantAnzahl===1?'Dienst':'Dienste'}</div><div class="stat-label">Dienste (nicht relevant) ${new Date().getFullYear()}</div></div>
       <div class="stat-card"><div class="stat-zahl">${dauerFormat(stats.gesamtEinsatz)}h</div><div class="stat-label">Einsatzstunden ${new Date().getFullYear()}</div></div>
       <div class="stat-card"><div class="stat-zahl">${stats.einsaetze}</div><div class="stat-label">${stats.einsaetze===1?'Einsatz':'Einsätze'} ${new Date().getFullYear()}</div></div>
     </div>

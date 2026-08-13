@@ -68,12 +68,14 @@ function anwesenheitBadge(s) {
   return '<span style="color:#f59e0b;font-size:1.1rem">⏳</span>'; // keine Reaktion
 }
 // Stunden-Anrechnung für eine Anwesenheit: bei Diensten immer die hinterlegte Dauer.
-// Bei Einsätzen gilt die pauschale 15-Minuten-Regel für "Bereitschaft" (in der Wache
-// geblieben, nicht ausgerückt) sowie für Einsätze ohne Endzeit (Fahrzeug ist gar nicht
-// ausgerückt – dann bekommen alle Zusagen pauschal 15 Minuten, nicht nur die, die
-// explizit auf Bereitschaft gesetzt wurden).
+// Bei Einsätzen gilt die pauschale 15-Minuten-Regel für "Bereitschaft" (in der Wache geblieben,
+// nicht ausgerückt) – unabhängig davon, ob/wann die Einsatz-Endzeit gesetzt ist (siehe
+// pruefeBereitschaftAutoEndzeit()). Wer tatsächlich ausgerückt ist, bekommt die reguläre Dauer
+// aus Beginn/Ende des Einsatzes – solange die Endzeit noch fehlt (z. B. weil die automatische
+// Bereitschafts-Endzeit gerade zurückgenommen wurde, weil doch noch jemand ausgerückt ist),
+// zählen für ihn 0 Std., bis sie nachgetragen wird.
 function einsatzStunden(a, eintrag, istEinsatz) {
-  if (istEinsatz && (a.status === 'bereitschaft' || (eintrag && !eintrag.zeitEnde))) return 0.25;
+  if (istEinsatz && a.status === 'bereitschaft') return 0.25;
   return eintrag?.dauer_h ?? a.dauer_h ?? 0;
 }
 function getStats(anwesenheiten, dienstMap, einsatzMap, jahr) {
@@ -722,9 +724,10 @@ function renderEintrag(u, meineMap) {
     (fw.hatRecht('dienste_bearbeiten') && dienstUnvollstaendig(u)) ||
     (fw.hatRecht('einsaetze_bearbeiten') && einsatzUnvollstaendig(u))
   );
+  // Gelbe Zeilen-Hervorhebung nur noch für "heute" (Einsatz) – bei Unvollständig bleibt
+  // ausschließlich das ⚠️ vor dem Titel als Hinweis, keine Zeilen-Einfärbung mehr.
   let highlightStyle = '';
   if (istHeute) highlightStyle = 'border-left:3px solid var(--red);padding-left:0.5rem;background:rgba(220,38,38,0.08);';
-  else if (istUnvollstaendig) highlightStyle = 'border-left:3px solid #f59e0b;padding-left:0.5rem;background:rgba(245,158,11,0.08);';
   const nichtRelevantBadge = ''; // nicht relevant wird nicht in der Liste angezeigt
   const artLabel = u.art ? dienstArtLabel(u.art) : '';
   // MP-Feuer-Haken: ganz normales Recht (wie News sehen) – wer's nicht hat, sieht das Badge nicht.
@@ -735,7 +738,6 @@ function renderEintrag(u, meineMap) {
       <div class="list-item-title">${istHeute ? '🚨 ' : ''}${istUnvollstaendig ? '⚠️ ' : ''}${u.titel}${nichtRelevantBadge}</div>
       ${u.ort ? `<div class="list-item-sub" style="margin-top:0.05rem">📍 ${u.ort}</div>` : ''}
       <div class="list-item-sub">${datum(u.datum)}${zeitZeile(u) ? ' · '+zeitZeile(u) : ''}${artLabel ? ' · '+artLabel : ''}${u.typ !== 'einsatz' && u.relevant !== false ? ' · <span style="color:#22c55e;font-weight:600">40h</span>' : ''}${mpGeprueft ? ' · <span style="color:#16a34a;font-weight:600">✔ MP</span>' : ''}</div>
-      ${istUnvollstaendig ? `<div class="list-item-sub" style="color:#f59e0b;margin-top:0.1rem">⚠️ Unvollständig (Daten prüfen)</div>` : ''}
     </div>
     <div class="list-item-right">${badge}</div>
     <div class="list-chevron">›</div>
@@ -1032,6 +1034,11 @@ let _einsatzListener = null; // aktiver onSnapshot Listener
 registerPage('uebung-detail', async (el, {id, typ}) => {
   // alten Listener aufräumen
   if (_einsatzListener) { _einsatzListener(); _einsatzListener = null; }
+  // Selbstheilung: pruefeBereitschaftAutoEndzeit() läuft sonst nur reaktiv bei einer neuen
+  // Reaktion/Umschaltung. Ältere Einsätze, die schon vor dieser Funktion (oder ohne seitdem
+  // erfolgte Änderung) auf "nur Bereitschaft" standen, holen die automatische Endzeit hier beim
+  // Öffnen der Detailseite nach.
+  if ((typ || 'dienst') === 'einsatz') await pruefeBereitschaftAutoEndzeit(id);
   const [snap, owSnap] = await Promise.all([
     fw.getDoc(col(typ||'dienst')+'/'+id),
     fw.getDocs('ortswehren'),
@@ -1087,19 +1094,6 @@ registerPage('uebung-detail', async (el, {id, typ}) => {
           <button class="btn btn-secondary btn-sm" onclick="ortSpeichern('${u.id}')">📍 Speichern</button>
         </div>
       ` : ''}
-      ${darfMp ? `
-        <label style="display:flex;align-items:center;gap:0.5rem;margin-top:0.6rem;cursor:pointer;font-size:0.85rem">
-          <input type="checkbox" id="mp-checkbox" ${mpGeprueft ? 'checked' : ''} onchange="mpUmschalten('${u.typ}','${id}',this.checked)">
-          In MP-Feuer überprüft
-        </label>
-      ` : ''}
-      ${darfBemerkung ? `
-        <div style="margin-top:0.6rem">
-          <label style="font-size:0.82rem;color:var(--muted)">Bemerkung (nur für Berechtigte sichtbar)</label>
-          <textarea id="bemerkung-feld" rows="3" style="width:100%;background:var(--panel2);border:1px solid var(--border);border-radius:8px;padding:0.5rem;font-size:0.85rem;color:var(--text);resize:vertical;margin-top:0.3rem">${u.bemerkung||''}</textarea>
-          <button class="btn btn-secondary btn-sm" style="margin-top:0.3rem" onclick="bemerkungSpeichern('${u.typ}','${id}')">💾 Bemerkung speichern</button>
-        </div>
-      ` : ''}
     </div>
     <div class="section-header"><span id="einsatz-zaehler" style="font-weight:400;font-size:0.85rem"></span></div>
     <div id="einsatz-reaktionen" class="card">⏳ Lade...</div>
@@ -1112,6 +1106,23 @@ registerPage('uebung-detail', async (el, {id, typ}) => {
         onclick="einsatzReagieren('${id}','kommt_nicht')">👎 Komme nicht</button>
     </div>
     ${fw.hatRecht(teilnRecht) ? `<div style="padding:0 0 0.5rem">${eintragBtn}</div>` : ''}
+    ${(darfMp || darfBemerkung) ? `
+    <div class="card" style="margin-top:0.8rem">
+      ${darfMp ? `
+        <label style="display:flex;align-items:center;gap:0.5rem;cursor:pointer;font-size:0.85rem">
+          <input type="checkbox" id="mp-checkbox" ${mpGeprueft ? 'checked' : ''} onchange="mpUmschalten('${u.typ}','${id}',this.checked)">
+          In MP-Feuer überprüft
+        </label>
+      ` : ''}
+      ${darfBemerkung ? `
+        <div style="${darfMp ? 'margin-top:0.6rem' : ''}">
+          <label style="font-size:0.82rem;color:var(--muted)">Bemerkung (nur für Berechtigte sichtbar)</label>
+          <textarea id="bemerkung-feld" rows="3" style="width:100%;background:var(--panel2);border:1px solid var(--border);border-radius:8px;padding:0.5rem;font-size:0.85rem;color:var(--text);resize:vertical;margin-top:0.3rem">${u.bemerkung||''}</textarea>
+          <button class="btn btn-secondary btn-sm" style="margin-top:0.3rem" onclick="bemerkungSpeichern('${u.typ}','${id}')">💾 Bemerkung speichern</button>
+        </div>
+      ` : ''}
+    </div>
+    ` : ''}
   `;
 
   // Autocomplete für inline Adress-Eingabe (Detail-Seite, kein <script> in innerHTML)
@@ -2838,6 +2849,158 @@ registerPage('rang-form', async (el, {id}) => {
   };
 });
 
+// ── Dienste & Einsätze: tabellarisches Bearbeiten vergangener Einträge ────
+// "Backend"-Ansicht für Massen-Korrekturen (z. B. nachträgliches Vervollständigen vieler alter
+// Einträge in einem Rutsch), statt jeden einzeln über die normale Detail-/Formularseite zu öffnen.
+registerPage('uebungen-backend', async (el) => {
+  const darfDienste   = fw.hatRecht('dienste_bearbeiten');
+  const darfEinsaetze  = fw.hatRecht('einsaetze_bearbeiten');
+  if (!darfDienste && !darfEinsaetze) { navigate('dashboard'); return; }
+  fw.setTitle('Dienste & Einsätze');
+  fw.showBack(() => navigateBack());
+  await ladeDienstarten();
+
+  const heute = new Date(); heute.setHours(0,0,0,0);
+  const toDate = d => d?.toDate ? d.toDate() : new Date(d);
+  const esc = s => (s||'').replace(/&/g,'&amp;').replace(/"/g,'&quot;');
+  const datumVal = d => { const x = toDate(d); return isNaN(x) ? '' : x.toISOString().slice(0,10); };
+  const inputStyle = 'background:var(--panel2);border:1px solid var(--border);border-radius:6px;padding:0.25rem 0.4rem;font-size:0.8rem;color:var(--text)';
+
+  const [dSnap, eSnap] = await Promise.all([
+    darfDienste  ? fw.getDocs('dienste')   : Promise.resolve({docs:[]}),
+    darfEinsaetze ? fw.getDocs('einsaetze') : Promise.resolve({docs:[]}),
+  ]);
+  const dienste = dSnap.docs.map(d => ({id:d.id,...d.data()}))
+    .filter(u => toDate(u.datum) < heute)
+    .sort((a,b) => toDate(b.datum) - toDate(a.datum));
+  const einsaetze = eSnap.docs.map(d => ({id:d.id,...d.data()}))
+    .filter(u => toDate(u.datum) < heute)
+    .sort((a,b) => toDate(b.datum) - toDate(a.datum));
+
+  const einsatzRows = einsaetze.map(u => {
+    const unv = einsatzUnvollstaendig(u);
+    return `<tr data-id="${u.id}" data-typ="einsatz" data-unv="${unv?1:0}" style="border-bottom:1px solid var(--border)">
+      <td class="bt-warn" style="padding:0.3rem 0.2rem;width:1.2rem">${unv?'⚠️':''}</td>
+      <td style="padding:0.3rem 0.3rem"><input class="bt-titel" value="${esc(u.titel)}" oninput="backendDirty(this)" style="width:150px;${inputStyle}"></td>
+      <td style="padding:0.3rem 0.3rem"><input type="date" class="bt-datum" value="${datumVal(u.datum)}" oninput="backendDirty(this)" style="${inputStyle}"></td>
+      <td style="padding:0.3rem 0.3rem"><input type="time" class="bt-beginn" value="${u.zeitBeginn||''}" oninput="backendDirty(this)" style="${inputStyle}"></td>
+      <td style="padding:0.3rem 0.3rem"><input type="time" class="bt-ende" value="${u.zeitEnde||''}" oninput="backendDirty(this)" style="${inputStyle}"></td>
+      <td style="padding:0.3rem 0.3rem"><input class="bt-ort" value="${esc(u.ort||'')}" oninput="backendDirty(this)" style="width:130px;${inputStyle}"></td>
+      <td style="padding:0.3rem 0.3rem"><button class="btn btn-sm btn-success bt-save" style="display:none" onclick="backendZeileSpeichern(this)">💾</button></td>
+    </tr>`;
+  }).join('');
+
+  const dienstRows = dienste.map(u => {
+    const unv = dienstUnvollstaendig(u);
+    return `<tr data-id="${u.id}" data-typ="dienst" data-unv="${unv?1:0}" style="border-bottom:1px solid var(--border)">
+      <td class="bt-warn" style="padding:0.3rem 0.2rem;width:1.2rem">${unv?'⚠️':''}</td>
+      <td style="padding:0.3rem 0.3rem"><input class="bt-titel" value="${esc(u.titel)}" oninput="backendDirty(this)" style="width:150px;${inputStyle}"></td>
+      <td style="padding:0.3rem 0.3rem"><input type="date" class="bt-datum" value="${datumVal(u.datum)}" oninput="backendDirty(this)" style="${inputStyle}"></td>
+      <td style="padding:0.3rem 0.3rem"><input type="number" step="0.25" min="0" class="bt-dauer" value="${u.dauer_h||''}" oninput="backendDirty(this)" style="width:60px;${inputStyle}"></td>
+      <td style="padding:0.3rem 0.3rem"><select class="bt-art" onchange="backendDirty(this)" style="${inputStyle}">
+        <option value="">–</option>
+        ${_dienstarten.map(a => `<option value="${a.id}" ${u.art===a.id?'selected':''}>${esc(a.bezeichnung)}</option>`).join('')}
+      </select></td>
+      <td style="padding:0.3rem 0.3rem"><button class="btn btn-sm btn-success bt-save" style="display:none" onclick="backendZeileSpeichern(this)">💾</button></td>
+    </tr>`;
+  }).join('');
+
+  const zeigeTabs = darfDienste && darfEinsaetze;
+  const startTyp = darfEinsaetze ? 'einsatz' : 'dienst';
+
+  el.innerHTML = `
+    <div class="card" style="padding:0.6rem 0.8rem">
+      ${zeigeTabs ? `
+        <div style="display:flex;gap:0.4rem;margin-bottom:0.6rem">
+          <button class="btn btn-sm btn-primary" id="bt-tab-einsatz" onclick="backendTypWechseln('einsatz')">Einsätze (${einsaetze.length})</button>
+          <button class="btn btn-sm btn-secondary" id="bt-tab-dienst" onclick="backendTypWechseln('dienst')">Dienste (${dienste.length})</button>
+        </div>
+      ` : ''}
+      <label style="display:flex;align-items:center;gap:0.4rem;font-size:0.82rem;margin-bottom:0.6rem;cursor:pointer">
+        <input type="checkbox" id="bt-nur-unvollstaendig" onchange="backendFilter()">
+        Nur unvollständige zeigen
+      </label>
+      <div style="overflow-x:auto">
+        <table style="width:100%;border-collapse:collapse;font-size:0.8rem${startTyp!=='einsatz'?';display:none':''}" id="bt-table-einsatz">
+          <thead><tr style="text-align:left;border-bottom:2px solid var(--border)">
+            <th></th><th style="padding:0.3rem">Titel</th><th style="padding:0.3rem">Datum</th><th style="padding:0.3rem">Beginn</th><th style="padding:0.3rem">Ende</th><th style="padding:0.3rem">Ort</th><th></th>
+          </tr></thead>
+          <tbody>${einsatzRows || '<tr><td colspan="7" style="padding:0.6rem;color:var(--muted)">Keine Einträge</td></tr>'}</tbody>
+        </table>
+        <table style="width:100%;border-collapse:collapse;font-size:0.8rem${startTyp!=='dienst'?';display:none':''}" id="bt-table-dienst">
+          <thead><tr style="text-align:left;border-bottom:2px solid var(--border)">
+            <th></th><th style="padding:0.3rem">Titel</th><th style="padding:0.3rem">Datum</th><th style="padding:0.3rem">Dauer (h)</th><th style="padding:0.3rem">Art</th><th></th>
+          </tr></thead>
+          <tbody>${dienstRows || '<tr><td colspan="6" style="padding:0.6rem;color:var(--muted)">Keine Einträge</td></tr>'}</tbody>
+        </table>
+      </div>
+    </div>
+  `;
+});
+
+window.backendTypWechseln = (typ) => {
+  document.getElementById('bt-table-einsatz').style.display = typ === 'einsatz' ? '' : 'none';
+  document.getElementById('bt-table-dienst').style.display  = typ === 'dienst'  ? '' : 'none';
+  document.getElementById('bt-tab-einsatz')?.classList.toggle('btn-primary', typ === 'einsatz');
+  document.getElementById('bt-tab-einsatz')?.classList.toggle('btn-secondary', typ !== 'einsatz');
+  document.getElementById('bt-tab-dienst')?.classList.toggle('btn-primary', typ === 'dienst');
+  document.getElementById('bt-tab-dienst')?.classList.toggle('btn-secondary', typ !== 'dienst');
+};
+
+window.backendFilter = () => {
+  const nur = document.getElementById('bt-nur-unvollstaendig').checked;
+  document.querySelectorAll('tr[data-unv]').forEach(tr => {
+    tr.style.display = (!nur || tr.dataset.unv === '1') ? '' : 'none';
+  });
+};
+
+// Zeigt den Speichern-Button der Zeile an, sobald ein Feld geändert wurde.
+window.backendDirty = (input) => {
+  const tr = input.closest('tr');
+  const btn = tr?.querySelector('.bt-save');
+  if (btn) btn.style.display = 'inline-flex';
+};
+
+window.backendZeileSpeichern = async (btnEl) => {
+  const tr = btnEl.closest('tr');
+  const id = tr.dataset.id;
+  const typ = tr.dataset.typ;
+  const titel = tr.querySelector('.bt-titel').value.trim();
+  const datumStr = tr.querySelector('.bt-datum').value;
+  if (!titel || !datumStr) { fw.toast('Titel und Datum erforderlich', true); return; }
+  const data = { titel, datum: new Date(datumStr) };
+  let unv;
+  if (typ === 'einsatz') {
+    const zeitBeginn = tr.querySelector('.bt-beginn').value || null;
+    const zeitEnde   = tr.querySelector('.bt-ende').value || null;
+    const ort        = tr.querySelector('.bt-ort').value.trim() || null;
+    let dauer_h = 0;
+    if (zeitBeginn && zeitEnde) {
+      const [bh,bm] = zeitBeginn.split(':').map(Number);
+      const [eh,em] = zeitEnde.split(':').map(Number);
+      dauer_h = Math.round(((eh*60+em) - (bh*60+bm)) / 60 * 100) / 100;
+    }
+    // Manuell gepflegte Endzeit ist keine automatische Bereitschafts-Endzeit mehr.
+    Object.assign(data, { zeitBeginn, zeitEnde, ort, dauer_h, zeitEndeAuto: false });
+    unv = einsatzUnvollstaendig({...data, typ: 'einsatz'});
+  } else {
+    const dauer_h = parseFloat(tr.querySelector('.bt-dauer').value) || 0;
+    const art = tr.querySelector('.bt-art').value || null;
+    if (!art) { fw.toast('Dienst-Art erforderlich', true); return; }
+    Object.assign(data, { dauer_h, art, relevant: dienstArtRelevant(art) });
+    unv = dienstUnvollstaendig({...data, typ: 'dienst'});
+  }
+  try {
+    await fw.updateDoc(col(typ)+'/'+id, data);
+    fw.toast('Gespeichert ✅');
+    btnEl.style.display = 'none';
+    tr.dataset.unv = unv ? '1' : '0';
+    const warnCell = tr.querySelector('.bt-warn');
+    if (warnCell) warnCell.textContent = unv ? '⚠️' : '';
+    if (document.getElementById('bt-nur-unvollstaendig')?.checked && !unv) tr.style.display = 'none';
+  } catch(e) { fw.toast(e.message, true); }
+};
+
 registerPage('lehrgaenge', async (el) => {
   await ladeLehrgangsarten();
   fw.setTitle('Lehrgänge');
@@ -3596,6 +3759,7 @@ window.aufgabeEinblenden = async (key) => {
       ${fw.hatRecht('stammdaten_dienstgrade') ? `<button class="btn btn-secondary btn-sm btn-full" onclick="navigate('einstellungen-admin')">Dienstgrade & Filter</button>` : ''}
       ${fw.hatRecht('stammdaten_dienstarten') ? `<button class="btn btn-secondary btn-sm btn-full" onclick="navigate('dienstarten-verwalten')">Dienst-Arten</button>` : ''}
       ${fw.hatRecht('stammdaten_raenge') ? `<button class="btn btn-secondary btn-sm btn-full" onclick="navigate('raenge-verwalten')">Ränge</button>` : ''}
+      ${(fw.hatRecht('dienste_bearbeiten') || fw.hatRecht('einsaetze_bearbeiten')) ? `<button class="btn btn-secondary btn-sm btn-full" onclick="navigate('uebungen-backend')">📋 Dienste & Einsätze bearbeiten</button>` : ''}
     </div>
   `;
   if (fw.hatRecht('stammdaten_ortswehren')) ladeOrtswehrenInline();

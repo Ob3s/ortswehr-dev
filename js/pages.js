@@ -44,10 +44,38 @@ function dauerFormat(h) {
   const min = gesamt % 60;
   return min === 0 ? `${std}:00` : `${std}:${String(min).padStart(2,'0')}`;
 }
+// Dauer aus Beginn/Ende in Stunden. Liegt die Ende-Uhrzeit numerisch VOR der Beginn-Uhrzeit
+// (z. B. 22:00 -> 02:00), geht das Ende als am Folgetag ein, statt eine negative Dauer zu ergeben –
+// betrifft Einsätze, die über Mitternacht hinausgehen (z. B. nächtliche Alarmierungen).
+function dauerAusZeiten(beginn, ende) {
+  const [bh, bm] = beginn.split(':').map(Number);
+  const [eh, em] = ende.split(':').map(Number);
+  const beginnMin = bh*60 + bm;
+  let endeMin = eh*60 + em;
+  if (endeMin < beginnMin) endeMin += 24*60;
+  return Math.round((endeMin - beginnMin) / 60 * 100) / 100;
+}
 function zeitZeile(u) {
-  const z = u.zeitBeginn && u.zeitEnde
-    ? `${u.zeitBeginn} – ${u.zeitEnde} Uhr`
-    : u.zeitBeginn ? `${u.zeitBeginn} Uhr` : '';
+  let z = '';
+  if (u.zeitBeginn && u.zeitEnde) {
+    const [bh, bm] = u.zeitBeginn.split(':').map(Number);
+    const [eh, em] = u.zeitEnde.split(':').map(Number);
+    // Über Mitternacht hinaus: Ende numerisch vor Beginn -> tatsächliches End-Datum dranhängen
+    // (z. B. "02:00 (14.08.)"), statt nur eines vagen "(Folgetag)"-Texts.
+    const ueberMitternacht = !isNaN(bh) && !isNaN(eh) && (eh*60+em) < (bh*60+bm);
+    let endeSuffix = '';
+    if (ueberMitternacht && u.datum) {
+      const start = u.datum?.toDate ? u.datum.toDate() : new Date(u.datum);
+      if (!isNaN(start)) {
+        const ende = new Date(start);
+        ende.setDate(ende.getDate() + 1);
+        endeSuffix = ` (${String(ende.getDate()).padStart(2,'0')}.${String(ende.getMonth()+1).padStart(2,'0')}.)`;
+      }
+    }
+    z = `${u.zeitBeginn} – ${u.zeitEnde}${endeSuffix} Uhr`;
+  } else if (u.zeitBeginn) {
+    z = `${u.zeitBeginn} Uhr`;
+  }
   const d = u.dauer_h ? dauerFormat(u.dauer_h) + 'h' : '';
   return [z, d].filter(Boolean).join(' · ');
 }
@@ -741,22 +769,22 @@ function renderEintrag(u, meineMap) {
   if (istHeute) highlightStyle = 'border-left:3px solid var(--red);padding-left:0.5rem;background:rgba(220,38,38,0.08);';
   const nichtRelevantBadge = ''; // nicht relevant wird nicht in der Liste angezeigt
   const artLabel = u.art ? dienstArtLabel(u.art) : '';
-  // MP-Feuer-Haken: ganz normales Recht (wie News sehen) – wer's nicht hat, sieht weder Status noch Knopf.
-  // Zusätzlich zur Checkbox im Detail gibt's hier einen direkten Umschalt-Knopf in der Übersicht,
-  // damit man nicht für jeden einzelnen Eintrag extra ins Detail muss.
+  // MP-Feuer-Haken: ganz normales Recht (wie News sehen) – wer's nicht hat, sieht weder Status noch
+  // Knopf. Kleines klickbares Inline-Textbadge in der Sub-Zeile (kein Button/Kasten) – direkt
+  // umschaltbar, ohne extra ins Detail zu müssen, aber optisch dezent wie die alte reine Anzeige.
   const mpRecht = u.typ === 'einsatz' ? 'einsaetze_mp_pruefen' : 'dienste_mp_pruefen';
   const darfMp = fw.hatRecht(mpRecht);
   const mpGeprueft = u.mpGeprueft === true;
-  const mpBtnStyle = mpGeprueft ? 'background:rgba(22,163,74,0.12);border:1px solid rgba(22,163,74,0.4);color:#16a34a;' : '';
-  const mpBtn = darfMp ? `<button type="button" class="btn btn-sm btn-secondary" style="margin-top:0.3rem;font-size:0.68rem;padding:0.15rem 0.55rem;white-space:nowrap;${mpBtnStyle}"
-      onclick="event.stopPropagation();mpUmschaltenListe(this,'${u.typ}','${u.id}',${!mpGeprueft})">${mpGeprueft ? '✔ MP geprüft' : '☐ MP prüfen'}</button>` : '';
+  const mpSpan = darfMp
+    ? `<span onclick="event.stopPropagation();mpUmschaltenListe(this,'${u.typ}','${u.id}',${!mpGeprueft})" style="cursor:pointer;font-weight:600;color:${mpGeprueft ? '#16a34a' : 'var(--red)'}">${mpGeprueft ? '✔ MP' : '☐ MP'}</span>`
+    : '';
   return `<div class="list-item" onclick="navigate('uebung-detail',{id:'${u.id}',typ:'${u.typ}'})" style="${highlightStyle}">
     <div class="list-item-body">
       <div class="list-item-title">${istHeute ? '🚨 ' : ''}${istUnvollstaendig ? '⚠️ ' : ''}${u.titel}${nichtRelevantBadge}</div>
       ${u.ort ? `<div class="list-item-sub" style="margin-top:0.05rem">📍 ${u.ort}</div>` : ''}
-      <div class="list-item-sub">${datum(u.datum)}${zeitZeile(u) ? ' · '+zeitZeile(u) : ''}${artLabel ? ' · '+artLabel : ''}${u.typ !== 'einsatz' && u.relevant !== false ? ' · <span style="color:#22c55e;font-weight:600">40h</span>' : ''}</div>
+      <div class="list-item-sub">${datum(u.datum)}${zeitZeile(u) ? ' · '+zeitZeile(u) : ''}${artLabel ? ' · '+artLabel : ''}${u.typ !== 'einsatz' && u.relevant !== false ? ' · <span style="color:#22c55e;font-weight:600">40h</span>' : ''}${mpSpan ? ' · '+mpSpan : ''}</div>
     </div>
-    <div class="list-item-right" style="display:flex;flex-direction:column;align-items:flex-end;gap:0.1rem">${badge}${mpBtn}</div>
+    <div class="list-item-right">${badge}</div>
     <div class="list-chevron">›</div>
   </div>`;
 }
@@ -1408,15 +1436,15 @@ window.mpUmschalten = async (typ, id, geprueft) => {
 
 // Direkter Umschalt-Knopf in der Übersicht (renderEintrag): ruft dieselbe Firestore-Logik wie die
 // Detail-Checkbox auf, aktualisiert danach nur den eigenen Knopf statt die ganze Liste neu zu laden.
-window.mpUmschaltenListe = async (btn, typ, id, geprueft) => {
-  btn.disabled = true;
+window.mpUmschaltenListe = async (el, typ, id, geprueft) => {
+  el.style.pointerEvents = 'none';
   try {
     await mpUmschalten(typ, id, geprueft);
-    btn.textContent = geprueft ? '✔ MP geprüft' : '☐ MP prüfen';
-    btn.style.cssText = `margin-top:0.3rem;font-size:0.68rem;padding:0.15rem 0.55rem;white-space:nowrap;${geprueft ? 'background:rgba(22,163,74,0.12);border:1px solid rgba(22,163,74,0.4);color:#16a34a;' : ''}`;
-    btn.setAttribute('onclick', `event.stopPropagation();mpUmschaltenListe(this,'${typ}','${id}',${!geprueft})`);
+    el.textContent = geprueft ? '✔ MP' : '☐ MP';
+    el.style.color = geprueft ? '#16a34a' : 'var(--red)';
+    el.setAttribute('onclick', `event.stopPropagation();mpUmschaltenListe(this,'${typ}','${id}',${!geprueft})`);
   } finally {
-    btn.disabled = false;
+    el.style.pointerEvents = '';
   }
 };
 
@@ -1781,10 +1809,7 @@ window.berechneDauer = () => {
   const b = document.getElementById('f-beginn')?.value;
   const e = document.getElementById('f-ende')?.value;
   if (!b || !e) return;
-  const [bh, bm] = b.split(':').map(Number);
-  const [eh, em] = e.split(':').map(Number);
-  const diff = (eh * 60 + em) - (bh * 60 + bm);
-  if (diff > 0) document.getElementById('f-dauer').value = Math.round(diff / 60 * 100) / 100;
+  document.getElementById('f-dauer').value = dauerAusZeiten(b, e);
 };
 
 window.uebungSpeichern = async (id, forcTyp) => {
@@ -1799,11 +1824,9 @@ window.uebungSpeichern = async (id, forcTyp) => {
   const zeitBeginn = document.getElementById('f-beginn')?.value || null;
   const zeitEnde   = document.getElementById('f-ende')?.value || null;
 
-  // Dauer aus Zeiten berechnen wenn vorhanden
+  // Dauer aus Zeiten berechnen wenn vorhanden (mit Mitternachts-Überlauf, siehe dauerAusZeiten)
   if (isEinsatz && zeitBeginn && zeitEnde) {
-    const [bh, bm] = zeitBeginn.split(':').map(Number);
-    const [eh, em] = zeitEnde.split(':').map(Number);
-    dauer_h = Math.round(((eh*60+em) - (bh*60+bm)) / 60 * 100) / 100;
+    dauer_h = dauerAusZeiten(zeitBeginn, zeitEnde);
   }
 
   if (!titel) { fw.toast('Stichwort erforderlich', true); return; }
@@ -2003,9 +2026,10 @@ registerPage('profil', async (el) => {
       </div>
     </div>
     <div class="stats-grid">
-      <div class="stat-card"><div class="stat-zahl">${dauerFormat(stats.dienstRelevant)}h</div><div class="stat-count">${stats.dienstRelevantAnzahl} ${stats.dienstRelevantAnzahl===1?'Dienst':'Dienste'}</div><div class="stat-label">Dienststunden ${new Date().getFullYear()}</div></div>
+      <div class="stat-card"><div class="stat-zahl">${dauerFormat(stats.dienstRelevant)}h</div><div class="stat-label">Dienststunden ${new Date().getFullYear()}</div></div>
+      <div class="stat-card"><div class="stat-zahl">${stats.dienste}</div><div class="stat-label">${stats.dienste===1?'Dienst':'Dienste'} ${new Date().getFullYear()}</div></div>
       <div class="stat-card"><div class="stat-zahl">${dauerFormat(stats.gesamtEinsatz)}h</div><div class="stat-label">Einsatzstunden ${new Date().getFullYear()}</div></div>
-      <div class="stat-card wide"><div class="stat-zahl">${stats.einsaetze}</div><div class="stat-label">${stats.einsaetze===1?'Einsatz':'Einsätze'} ${new Date().getFullYear()}</div></div>
+      <div class="stat-card"><div class="stat-zahl">${stats.einsaetze}</div><div class="stat-label">${stats.einsaetze===1?'Einsatz':'Einsätze'} ${new Date().getFullYear()}</div></div>
     </div>
 
     <details class="card" style="padding:0">
@@ -3120,9 +3144,7 @@ window.backendZeileSpeichern = async (btnEl) => {
     const ort        = tr.querySelector('.bt-ort').value.trim() || null;
     let dauer_h = 0;
     if (zeitBeginn && zeitEnde) {
-      const [bh,bm] = zeitBeginn.split(':').map(Number);
-      const [eh,em] = zeitEnde.split(':').map(Number);
-      dauer_h = Math.round(((eh*60+em) - (bh*60+bm)) / 60 * 100) / 100;
+      dauer_h = dauerAusZeiten(zeitBeginn, zeitEnde);
     }
     // Manuell gepflegte Endzeit ist keine automatische Bereitschafts-Endzeit mehr.
     Object.assign(data, { zeitBeginn, zeitEnde, ort, dauer_h, zeitEndeAuto: false });

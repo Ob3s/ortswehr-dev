@@ -1,1 +1,1 @@
-[{"version": "20260814111233", "datum": "14.08.2026", "punkte": ["Einsatz-/Dienst-Detail: Vorheriger/N\u00e4chster-Navigation, bl\u00e4ttert durch Dienste und Eins\u00e4tze zusammen", "MP-Badge: ungepr\u00fcft jetzt ein \u2715 statt dem Kasten-Zeichen"]}]
+[{"version": "20260814122654", "datum": "14.08.2026", "punkte": ["Dienst-Art speichern gleicht jetzt immer bestehende Dienste ab (vorher nur bei erkannter \u00c4nderung)", "Dienst-Arten: neuer Knopf, um bestehende Dienste einmalig mit der aktuellen 40h-Einstufung abzugleichen (bereinigt alte Karteileichen)"]}]

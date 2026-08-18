@@ -2796,11 +2796,10 @@ registerPage('kameraden', async (el) => {
 
 window.navigiereZuFahrzeug = (fahrzeugId) => {
   navigate('dienste');
-  // Nach dem Navigieren das richtige Accordion öffnen
   if (fahrzeugId) {
     setTimeout(() => {
-      const el = document.querySelector(`details[data-fz-id="${fahrzeugId}"]`);
-      if (el) { el.open = true; el.scrollIntoView({ behavior: 'smooth', block: 'start' }); }
+      const el = document.querySelector(`[data-fz-id="${fahrzeugId}"]`);
+      if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
     }, 600);
   }
 };
@@ -3411,29 +3410,24 @@ async function ladePruefaufgabenInline() {
   }));
 
   // Offene Dropdowns merken vor dem Re-Render
-  const offeneDetails = new Set(
-    [...el.querySelectorAll('details[open]')].map(d => d.dataset.fzId)
-  );
-
   el.innerHTML = dashHtml + fahrzeuge.map(f => `
-    <details data-fz-id="${f.id}" style="margin-bottom:0.5rem;border:1px solid var(--border);border-radius:10px" ${offeneDetails.has(f.id) ? 'open' : ''}>
-      <summary style="padding:0.4rem 0.8rem;cursor:pointer;list-style:none;display:flex;align-items:center;justify-content:space-between;font-weight:600;font-size:13px;border-radius:8px">
-        <span>${f.name}${f.bezeichnung ? ` <span style="font-weight:400;color:var(--muted);font-size:0.8rem">(${f.bezeichnung})</span>` : ''}</span>
-        <div style="display:flex;gap:0.4rem;align-items:center">
-          ${istWF ? `<button class="btn btn-sm btn-secondary" style="font-size:0.65rem;padding:0.15rem 0.4rem" onclick="event.stopPropagation();navigate('fahrzeug-form',{id:'${f.id}'})">✏️</button>
-          <button class="btn btn-sm btn-secondary" style="font-size:0.65rem;padding:0.15rem 0.4rem" onclick="event.stopPropagation();navigate('pruefaufgabe-form',{fahrzeugId:'${f.id}'})">+</button>` : ''}
-          <span style="color:var(--muted)">▾</span>
-        </div>
-      </summary>
-      <div style="padding:0 0.8rem 0.8rem">
-        ${aufgabenHtml(f.id)}
-        <div style="margin-top:0.6rem;padding-top:0.4rem;border-top:1px solid var(--border)">
-          <textarea id="notiz-${f.id}" rows="3" style="width:100%;background:var(--panel2);border:1px solid var(--border);border-radius:8px;padding:0.5rem;font-size:0.8rem;color:var(--text);resize:vertical" placeholder="Notizen zu diesem Fahrzeug…">${fahrzeugNotizen[f.id]||''}</textarea>
-          <button class="btn btn-secondary btn-sm" style="margin-top:0.3rem" onclick="fahrzeugNotizSpeichern('${f.id}')">💾 Notiz speichern</button>
+    <div data-fz-id="${f.id}" style="margin-bottom:1rem">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:0.3rem">
+        <div style="font-weight:700;font-size:0.9rem">${f.name}${f.bezeichnung ? ` <span style="font-weight:400;color:var(--muted);font-size:0.8rem">(${f.bezeichnung})</span>` : ''}</div>
+        <div style="display:flex;gap:0.3rem">
+          ${istWF ? `<button class="btn btn-sm btn-secondary" style="font-size:0.65rem;padding:0.15rem 0.4rem" onclick="navigate('fahrzeug-form',{id:'${f.id}'})">✏️</button>
+          <button class="btn btn-sm btn-secondary" style="font-size:0.65rem;padding:0.15rem 0.4rem" onclick="navigate('pruefaufgabe-form',{fahrzeugId:'${f.id}'})">+</button>` : ''}
         </div>
       </div>
-    </details>`).join('') +
-    (istWF ? `<button class="btn btn-secondary btn-sm" style="margin-top:0.5rem" onclick="navigate('fahrzeug-form',{})">+ Fahrzeug hinzufügen</button>` : '');
+      <div class="card" style="padding:0.4rem 0.8rem">
+        ${aufgabenHtml(f.id)}
+        <div style="margin-top:0.5rem;padding-top:0.4rem;border-top:1px solid var(--border)">
+          <textarea id="notiz-${f.id}" rows="2" style="width:100%;background:var(--panel2);border:1px solid var(--border);border-radius:8px;padding:0.5rem;font-size:0.8rem;color:var(--text);resize:vertical" placeholder="Notizen…">${fahrzeugNotizen[f.id]||''}</textarea>
+          <button class="btn btn-secondary btn-sm" style="margin-top:0.3rem" onclick="fahrzeugNotizSpeichern('${f.id}')">💾 Notiz</button>
+        </div>
+      </div>
+    </div>`).join('') +
+    (istWF ? `<button class="btn btn-secondary btn-sm" style="margin-top:0.3rem" onclick="navigate('fahrzeug-form',{})">+ Fahrzeug hinzufügen</button>` : '');
 
   window.fahrzeugNotizSpeichern = async (fzId) => {
     const text = document.getElementById('notiz-'+fzId)?.value || '';

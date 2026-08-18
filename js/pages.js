@@ -2750,13 +2750,16 @@ registerPage('kameraden', async (el) => {
 
     if (sichtbareAufgaben.length || ausgeblendetAufgaben.length) {
       aufgabenHtml = `
-        <div class="card" style="margin-bottom:0.6rem;padding:0">
-          <div style="padding:0.4rem 0.8rem 0;font-weight:600;font-size:13px;color:#f59e0b">⚠️ Offene Aufgaben (${sichtbareAufgaben.length})</div>
+        <details class="card" style="margin-bottom:0.6rem;padding:0">
+          <summary style="list-style:none;padding:0.4rem 0.8rem;cursor:pointer;display:flex;align-items:center;justify-content:space-between;font-size:13px;border-radius:8px">
+            <span style="font-weight:600;color:#f59e0b">⚠️ Offene Aufgaben (${sichtbareAufgaben.length})</span>
+            <span style="color:var(--muted);font-size:1.1rem">▾</span>
+          </summary>
           <div style="padding:0 0.8rem 0.8rem">
             ${sichtbareAufgaben.map(a => aufgabeZeile(a, true)).join('')}
             ${archivBlock}
           </div>
-        </div>`;
+        </details>`;
     } else {
       aufgabenHtml = `<div class="card" style="margin-bottom:0.6rem;color:#22c55e;font-size:0.88rem">✅ Keine offenen Aufgaben</div>`;
     }

@@ -3412,13 +3412,16 @@ async function ladePruefaufgabenInline() {
   // Offene Dropdowns merken vor dem Re-Render
   el.innerHTML = dashHtml + fahrzeuge.map(f => `
     <div data-fz-id="${f.id}" style="margin-bottom:1rem">
-      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:0.3rem">
+      ${istWF && fahrzeuge.length > 1 ? `<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:0.3rem">
         <div style="font-weight:700;font-size:0.9rem">${f.name}${f.bezeichnung ? ` <span style="font-weight:400;color:var(--muted);font-size:0.8rem">(${f.bezeichnung})</span>` : ''}</div>
         <div style="display:flex;gap:0.3rem">
-          ${istWF ? `<button class="btn btn-sm btn-secondary" style="font-size:0.65rem;padding:0.15rem 0.4rem" onclick="navigate('fahrzeug-form',{id:'${f.id}'})">✏️</button>
-          <button class="btn btn-sm btn-secondary" style="font-size:0.65rem;padding:0.15rem 0.4rem" onclick="navigate('pruefaufgabe-form',{fahrzeugId:'${f.id}'})">+</button>` : ''}
+          <button class="btn btn-sm btn-secondary" style="font-size:0.65rem;padding:0.15rem 0.4rem" onclick="navigate('fahrzeug-form',{id:'${f.id}'})">✏️</button>
+          <button class="btn btn-sm btn-secondary" style="font-size:0.65rem;padding:0.15rem 0.4rem" onclick="navigate('pruefaufgabe-form',{fahrzeugId:'${f.id}'})">+</button>
         </div>
-      </div>
+      </div>` : istWF ? `<div style="display:flex;justify-content:flex-end;gap:0.3rem;margin-bottom:0.3rem">
+        <button class="btn btn-sm btn-secondary" style="font-size:0.65rem;padding:0.15rem 0.4rem" onclick="navigate('fahrzeug-form',{id:'${f.id}'})">✏️</button>
+        <button class="btn btn-sm btn-secondary" style="font-size:0.65rem;padding:0.15rem 0.4rem" onclick="navigate('pruefaufgabe-form',{fahrzeugId:'${f.id}'})">+</button>
+      </div>` : ''}
       <div class="card" style="padding:0.4rem 0.8rem">
         ${aufgabenHtml(f.id)}
         <div style="margin-top:0.5rem;padding-top:0.4rem;border-top:1px solid var(--border)">

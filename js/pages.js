@@ -3,22 +3,6 @@ function waitFw(cb) { if (window.fw) cb(); else setTimeout(() => waitFw(cb), 50)
 
 waitFw(() => {
 
-// Global: von überall aufrufbar (Kamerad-Aufgaben, Fahrzeuge-Übersicht), nicht an eine Seite gebunden
-window.navigiereZuFahrzeug = (fahrzeugId) => {
-  // Falls wir bereits auf der Dienste-Seite sind, nicht neu laden – nur aufklappen/scrollen
-  const bereitsDa = !!document.getElementById('fz-pruef-details');
-  if (!bereitsDa) navigate('dienste');
-  // Nach dem (Neu-)Rendern das äußere und das richtige Fahrzeug-Accordion öffnen
-  if (fahrzeugId) {
-    setTimeout(() => {
-      const aussen = document.getElementById('fz-pruef-details');
-      if (aussen) aussen.open = true;
-      const el = document.querySelector(`details[data-fz-id="${fahrzeugId}"]`);
-      if (el) { el.open = true; el.scrollIntoView({ behavior: 'smooth', block: 'start' }); }
-    }, bereitsDa ? 0 : 600);
-  }
-};
-
 // ── Helpers ───────────────────────────────────────────────
 function datum(d) {
   if (!d) return '–';
@@ -44,38 +28,10 @@ function dauerFormat(h) {
   const min = gesamt % 60;
   return min === 0 ? `${std}:00` : `${std}:${String(min).padStart(2,'0')}`;
 }
-// Dauer aus Beginn/Ende in Stunden. Liegt die Ende-Uhrzeit numerisch VOR der Beginn-Uhrzeit
-// (z. B. 22:00 -> 02:00), geht das Ende als am Folgetag ein, statt eine negative Dauer zu ergeben –
-// betrifft Einsätze, die über Mitternacht hinausgehen (z. B. nächtliche Alarmierungen).
-function dauerAusZeiten(beginn, ende) {
-  const [bh, bm] = beginn.split(':').map(Number);
-  const [eh, em] = ende.split(':').map(Number);
-  const beginnMin = bh*60 + bm;
-  let endeMin = eh*60 + em;
-  if (endeMin < beginnMin) endeMin += 24*60;
-  return Math.round((endeMin - beginnMin) / 60 * 100) / 100;
-}
 function zeitZeile(u) {
-  let z = '';
-  if (u.zeitBeginn && u.zeitEnde) {
-    const [bh, bm] = u.zeitBeginn.split(':').map(Number);
-    const [eh, em] = u.zeitEnde.split(':').map(Number);
-    // Über Mitternacht hinaus: Ende numerisch vor Beginn -> tatsächliches End-Datum dranhängen
-    // (z. B. "02:00 (14.08.)"), statt nur eines vagen "(Folgetag)"-Texts.
-    const ueberMitternacht = !isNaN(bh) && !isNaN(eh) && (eh*60+em) < (bh*60+bm);
-    let endeSuffix = '';
-    if (ueberMitternacht && u.datum) {
-      const start = u.datum?.toDate ? u.datum.toDate() : new Date(u.datum);
-      if (!isNaN(start)) {
-        const ende = new Date(start);
-        ende.setDate(ende.getDate() + 1);
-        endeSuffix = ` (${String(ende.getDate()).padStart(2,'0')}.${String(ende.getMonth()+1).padStart(2,'0')}.)`;
-      }
-    }
-    z = `${u.zeitBeginn} – ${u.zeitEnde}${endeSuffix} Uhr`;
-  } else if (u.zeitBeginn) {
-    z = `${u.zeitBeginn} Uhr`;
-  }
+  const z = u.zeitBeginn && u.zeitEnde
+    ? `${u.zeitBeginn} – ${u.zeitEnde} Uhr`
+    : u.zeitBeginn ? `${u.zeitBeginn} Uhr` : '';
   const d = u.dauer_h ? dauerFormat(u.dauer_h) + 'h' : '';
   return [z, d].filter(Boolean).join(' · ');
 }
@@ -91,38 +47,24 @@ function kurzName(vorname, nachname) {
 }
 function anwesenheitBadge(s) {
   if (s==='bestaetigt' || s==='kommt')       return '<span style="color:#16a34a;font-size:1.1rem">✅</span>';
-  if (s==='bereitschaft')                    return '<span style="color:#2563eb;font-size:1.1rem">🏠</span>';
   if (s==='abgelehnt'  || s==='kommt_nicht') return '<span style="color:#dc2626;font-size:1.1rem">❌</span>';
   return '<span style="color:#f59e0b;font-size:1.1rem">⏳</span>'; // keine Reaktion
 }
-// Stunden-Anrechnung für eine Anwesenheit: bei Diensten immer die hinterlegte Dauer.
-// Bei Einsätzen gilt die pauschale 15-Minuten-Regel für "Bereitschaft" (in der Wache geblieben,
-// nicht ausgerückt) – unabhängig davon, ob/wann die Einsatz-Endzeit gesetzt ist (siehe
-// pruefeBereitschaftAutoEndzeit()). Wer tatsächlich ausgerückt ist, bekommt die reguläre Dauer
-// aus Beginn/Ende des Einsatzes – solange die Endzeit noch fehlt (z. B. weil die automatische
-// Bereitschafts-Endzeit gerade zurückgenommen wurde, weil doch noch jemand ausgerückt ist),
-// zählen für ihn 0 Std., bis sie nachgetragen wird.
-function einsatzStunden(a, eintrag, istEinsatz) {
-  if (istEinsatz && a.status === 'bereitschaft') return 0.25;
-  return eintrag?.dauer_h ?? a.dauer_h ?? 0;
-}
-function getStats(anwesenheiten, dienstMap, einsatzMap, jahr) {
+function getStats(anwesenheiten, dienstMap, einsatzMap) {
   const jetzt   = new Date();
-  const jahrAkt = jahr || jetzt.getFullYear();
-  // Die rollierende 12-Monats-Zielgröße bezieht sich immer auf "heute", unabhängig vom jahr-Parameter
+  const jahrAkt = jetzt.getFullYear();
   const vor12m  = new Date(); vor12m.setFullYear(jetzt.getFullYear()-1); vor12m.setHours(0,0,0,0);
 
   let gesamtEinsatz=0, dienstRelevant=0, dienstIrrelevant=0, einsaetze=0, dienste=0;
-  let dienstRelevantAnzahl=0, dienstIrrelevantAnzahl=0;
-  let dienstStunden12m=0, dienste12m=0;
+  let dienstStunden12m=0;
   for (const a of anwesenheiten) {
-    if (a.status !== 'bestaetigt' && a.status !== 'kommt' && a.status !== 'bereitschaft') continue;
+    if (a.status !== 'bestaetigt' && a.status !== 'kommt') continue;
     const dienstEintrag  = dienstMap?.get(a.uebungId)  || null;
     const einsatzEintrag = einsatzMap?.get(a.uebungId) || null;
     const eintrag   = dienstEintrag || einsatzEintrag || null;
     const typNorm   = a.typ === 'einsaetze' ? 'einsatz' : a.typ === 'dienste' ? 'dienst' : a.typ;
     const istEinsatz = typNorm === 'einsatz' || (!a.typ && !!einsatzEintrag && !dienstEintrag);
-    const h = einsatzStunden(a, eintrag, istEinsatz);
+    const h = eintrag?.dauer_h ?? a.dauer_h ?? 0;
     const d = a.datum?.toDate ? a.datum.toDate() : (eintrag?.datum?.toDate?.()  || new Date(a.datum));
     // relevant: default true, explizit false nur wenn gesetzt
     const istRelevant = eintrag?.relevant !== false;
@@ -132,10 +74,10 @@ function getStats(anwesenheiten, dienstMap, einsatzMap, jahr) {
     } else {
       if (d.getFullYear() === jahrAkt) {
         dienste++;
-        if (istRelevant) { dienstRelevant += h; dienstRelevantAnzahl++; }
-        else             { dienstIrrelevant += h; dienstIrrelevantAnzahl++; }
+        if (istRelevant) dienstRelevant += h;
+        else             dienstIrrelevant += h;
       }
-      if (d >= vor12m && istRelevant) { dienstStunden12m += h; dienste12m++; }
+      if (d >= vor12m && istRelevant) dienstStunden12m += h;
     }
   }
   const gesamtDienst = dienstRelevant + dienstIrrelevant;
@@ -144,49 +86,11 @@ function getStats(anwesenheiten, dienstMap, einsatzMap, jahr) {
     gesamtDienst:     Math.round(gesamtDienst*10)/10,
     dienstRelevant:   Math.round(dienstRelevant*10)/10,
     dienstIrrelevant: Math.round(dienstIrrelevant*10)/10,
-    dienstRelevantAnzahl, dienstIrrelevantAnzahl,
     einsaetze, dienste,
-    dienste12m,       // Anzahl relevanter Dienste im rollierenden 12-Monats-Fenster (passend zu stunden12mZiel)
     stunden12m:       Math.round(dienstRelevant*10)/10,  // aktuelles Jahr, nur relevante
     ziel:             dienstStunden12m >= 40,
     stunden12mZiel:   Math.round(dienstStunden12m*10)/10,
   };
-}
-
-// Für die Profil-Übersicht: Einzeleinträge statt nur Summen –
-// Dienste der letzten 12 Monate, Einsätze des laufenden Jahres.
-function meineEintraegeListen(anwesenheiten, dienstMap, einsatzMap) {
-  const jetzt   = new Date();
-  const jahrAkt = jetzt.getFullYear();
-  const vor12m  = new Date(); vor12m.setFullYear(jetzt.getFullYear()-1); vor12m.setHours(0,0,0,0);
-
-  const diensteListe = [], einsaetzeListe = [];
-  for (const a of anwesenheiten) {
-    if (a.status !== 'bestaetigt' && a.status !== 'kommt' && a.status !== 'bereitschaft') continue;
-    const dienstEintrag  = dienstMap?.get(a.uebungId)  || null;
-    const einsatzEintrag = einsatzMap?.get(a.uebungId) || null;
-    const eintrag = dienstEintrag || einsatzEintrag || null;
-    // Auch zählen, wenn der referenzierte Dienst/Einsatz inzwischen gelöscht wurde –
-    // dann auf die in der Anwesenheit gespeicherten Werte zurückfallen (wie getStats() es tut),
-    // damit Stats-Kachel und Liste nicht auseinanderlaufen.
-    const typNorm    = a.typ === 'einsaetze' ? 'einsatz' : a.typ === 'dienste' ? 'dienst' : a.typ;
-    const istEinsatz  = typNorm === 'einsatz' || (!a.typ && !!einsatzEintrag && !dienstEintrag);
-    const d = a.datum?.toDate ? a.datum.toDate() : (eintrag?.datum?.toDate?.() || new Date(a.datum));
-    const h = einsatzStunden(a, eintrag, istEinsatz);
-    const titel = eintrag?.titel || a.uebungTitel || '(Details nicht mehr verfügbar)';
-    const eintragObj = {
-      id: a.uebungId, titel, datum: d, dauer_h: h,
-      art: eintrag?.art || null, relevant: eintrag ? eintrag.relevant !== false : true,
-    };
-    if (istEinsatz) {
-      if (d.getFullYear() === jahrAkt) einsaetzeListe.push(eintragObj);
-    } else {
-      if (d >= vor12m) diensteListe.push(eintragObj);
-    }
-  }
-  diensteListe.sort((x,y) => y.datum - x.datum);
-  einsaetzeListe.sort((x,y) => y.datum - x.datum);
-  return { diensteListe, einsaetzeListe };
 }
 
 
@@ -259,28 +163,6 @@ function initOrtAutocomplete(inputId, onSelect) {
   });
 }
 
-// Zählt-in-der-Einsatzstärke-als wird live aus den Lehrgängen abgeleitet, nicht mehr manuell
-// gepflegt: wer einen Zugführer- bzw. Gruppenführer-Lehrgang hat, zählt entsprechend, alle
-// anderen als Kamerad/Mannschaft.
-// Optionaler Stichtag: zählt nur Lehrgänge, deren Prüfungsdatum (qualis[].datum) bis zu diesem
-// Zeitpunkt bereits erreicht war. Wichtig für historische Auswertungen (z. B. Stärke eines alten
-// Einsatzes) – sonst würde dort die HEUTIGE Qualifikation angezeigt, nicht die damalige (Bug: alte
-// Einsätze zeigten Kameraden rückwirkend schon als Gruppen-/Zugführer, obwohl sie das zum
-// Einsatzzeitpunkt noch nicht waren). Ohne Stichtag (Standardfall, z. B. Dashboard/aktueller
-// Status) bleibt das Verhalten wie bisher: alle vorhandenen Lehrgänge zählen.
-function staerkeKategorie(qualis, stichtag) {
-  const grenze = stichtag ? new Date(stichtag) : null;
-  const relevante = (qualis || []).filter(q => !grenze || (q.datum && new Date(q.datum) <= grenze));
-  const qs = relevante.map(q => (q.bezeichnung || q.titel || q.name || '').toLowerCase());
-  if (qs.some(q => q.includes('zugführer') || q.includes('zugfuehrer'))) return 'zugfuehrer';
-  if (qs.some(q => q.includes('gruppenführer') || q.includes('gruppenfuehrer'))) return 'gruppenfuehrer';
-  return 'kamerad';
-}
-async function staerkeKategorieVon(userId, stichtag) {
-  const qSnap = await fw.getDocs('users/'+userId+'/qualifikationen');
-  return staerkeKategorie(qSnap.docs.map(d => d.data()), stichtag);
-}
-
 // ── Dienst-Sichtbarkeit ───────────────────────────────────
 function dienstSichtbar(d, profil, qualis) {
   // Ortswehr-Filter: nur Dienste der eigenen Wehren anzeigen
@@ -302,11 +184,11 @@ function dienstSichtbar(d, profil, qualis) {
   if (titel.includes('maschinist')) {
     return qs.some(q => q.includes('maschinist'));
   }
-  // Führungskräfte (Sichtbarkeit richtet sich nach der aus den Lehrgängen abgeleiteten
-  // Stärke-Kategorie, nicht mehr nach einer manuell gepflegten Rolle)
+  // Führungskräfte
   const fuehTitel = (_dienstFilter?.fuehrung || ['führungskräfte', 'gruppenführersitzung', 'zugführersitzung', 'zug- und gruppenführer']);
   if (fuehTitel.some(t => titel.includes(t))) {
-    return profil?.rolle === 'wehrfuehrer' || staerkeKategorie(qualis) !== 'kamerad';
+    const rolle = profil?.rolle || '';
+    return ['gruppenführer','zugführer','wehrfuehrer'].includes(rolle);
   }
   return true;
 }
@@ -360,7 +242,7 @@ registerPage('dashboard', async (el) => {
       <span id="status-lampe" style="width:12px;height:12px;border-radius:50%;background:#ccc;display:inline-block;flex-shrink:0;cursor:pointer" title="Status wird geprüft..." onclick="zeigeStatusDetail()"></span>
     </div>
 
-    ${(fw.hatRecht('einsaetze_alarm_ausloesen') || fw.hatRecht('einsaetze_anlegen')) ? `<button class="alarm-btn" onclick="navigate('uebung-form',{typ:'einsatz',alarm:true})">🚨 Einsatz</button>` : ''}
+    <button class="alarm-btn" onclick="navigate('uebung-form',{typ:'einsatz',alarm:true})">🚨 Einsatz</button>
 
 ${renderNaechsteDienste(naechster, zweiter)}
 
@@ -422,7 +304,7 @@ function renderNewsBeitrag(b, usersMap) {
         }
       }).join('')}
       <div style="font-size:0.75rem;color:var(--muted);margin-top:0.3rem">${gesamt} Stimme${gesamt!==1?'n':''}</div>
-      ${fw.hatRecht('news_bearbeiten') && b.abstimmung.aenderungen?.length ? `<div style="font-size:0.72rem;color:#f59e0b;margin-top:0.3rem">⚠️ ${b.abstimmung.aenderungen.length} Stimme${b.abstimmung.aenderungen.length!==1?'n':''} geändert</div>` : ''}
+      ${fw.isWehrfuehrer() && b.abstimmung.aenderungen?.length ? `<div style="font-size:0.72rem;color:#f59e0b;margin-top:0.3rem">⚠️ ${b.abstimmung.aenderungen.length} Stimme${b.abstimmung.aenderungen.length!==1?'n':''} geändert</div>` : ''}
     </div>` : '';
   return `<div class="card" style="margin-bottom:0.6rem">
     <div style="font-weight:600;margin-bottom:0.3rem">${b.titel||''}</div>
@@ -430,10 +312,9 @@ function renderNewsBeitrag(b, usersMap) {
     ${b.pdf ? `<a href="${b.pdf.url}" target="_blank" style="display:inline-flex;align-items:center;gap:0.4rem;margin-top:0.5rem;padding:0.4rem 0.8rem;background:var(--panel2);border:1px solid var(--border);border-radius:8px;font-size:0.82rem;color:var(--blue);text-decoration:none;max-width:100%;overflow:hidden">📄 <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:200px">${b.pdf.name}</span></a>` : ''}
     ${abstimmungHtml}
     <div style="font-size:0.72rem;color:var(--muted);margin-top:0.5rem">${datum(b.erstelltAm)}</div>
-    ${(fw.hatRecht('news_bearbeiten') || fw.hatRecht('news_loeschen')) ? `<div style="margin-top:0.3rem;display:flex;gap:0.8rem">
-      ${fw.hatRecht('news_bearbeiten') ? `<button onclick="navigate('news-form',{id:'${b.id}'})" style="background:none;border:none;color:#9ca3af;font-size:0.75rem;cursor:pointer;padding:0">Bearbeiten</button>` : ''}
-      ${fw.hatRecht('news_loeschen') ? `<button onclick="newsLoeschen('${b.id}')" style="background:none;border:none;color:#9ca3af;font-size:0.75rem;cursor:pointer;padding:0">Löschen</button>
-      <button onclick="newsArchivieren('${b.id}',${!b.archiviert})" style="background:none;border:none;color:#9ca3af;font-size:0.75rem;cursor:pointer;padding:0">${b.archiviert ? 'Wiederherstellen' : 'Archivieren'}</button>` : ''}
+    ${fw.isWehrfuehrer() ? `<div style="margin-top:0.3rem;display:flex;gap:0.8rem">
+      <button onclick="newsLoeschen('${b.id}')" style="background:none;border:none;color:#9ca3af;font-size:0.75rem;cursor:pointer;padding:0">Löschen</button>
+      <button onclick="newsArchivieren('${b.id}',${!b.archiviert})" style="background:none;border:none;color:#9ca3af;font-size:0.75rem;cursor:pointer;padding:0">${b.archiviert ? 'Wiederherstellen' : 'Archivieren'}</button>
     </div>` : ''}
     <div style="margin-top:0.7rem;border-top:1px solid var(--border);padding-top:0.6rem">
       <div id="kommentare-${b.id}" style="margin-bottom:0.4rem">
@@ -441,7 +322,7 @@ function renderNewsBeitrag(b, usersMap) {
           const u = usersMap?.get(k.userId);
           const name = u ? kurzName(u.vorname, u.nachname) : '?';
           const istEigener = k.userId === fw.user.uid;
-          const istAdmin = fw.hatRecht('news_bearbeiten');
+          const istAdmin = fw.isWehrfuehrer();
           return `<div style="display:flex;gap:0.5rem;margin-bottom:0.5rem;align-items:flex-start">
             <div style="width:26px;height:26px;border-radius:50%;background:var(--panel2);display:flex;align-items:center;justify-content:center;font-size:0.7rem;flex-shrink:0;font-weight:600">${(u?.vorname||'?')[0]}${(u?.nachname||'')[0]||''}</div>
             <div style="flex:1;background:var(--panel2);border-radius:10px;padding:0.4rem 0.6rem;font-size:0.82rem">
@@ -487,7 +368,7 @@ async function ladeNewsFeed() {
   // Alten Listener aufräumen
   if (_newsFeedListener) { _newsFeedListener(); _newsFeedListener = null; }
 
-  const beitragBtn = fw.hatRecht('news_anlegen') ? `<button class="btn btn-secondary btn-sm" onclick="navigate('news-form')">📝 Beitrag</button>` : '';
+  const beitragBtn = fw.isWehrfuehrer() ? `<button class="btn btn-secondary btn-sm" onclick="navigate('news-form')">📝 Beitrag</button>` : '';
   const header = `<div class="section-header" style="display:flex;align-items:center;justify-content:space-between">Neuigkeiten${beitragBtn}</div>`;
 
   // usersMap einmalig laden
@@ -501,7 +382,7 @@ async function ladeNewsFeed() {
     const meineWehrIds = fw.profil.ortswehrIds?.length ? fw.profil.ortswehrIds : (fw.profil.ortswehrId ? [fw.profil.ortswehrId] : []);
     const alle = snap.docs
       .map(d => ({id:d.id,...d.data()}))
-      .filter(d => !d.ortswehrIds?.length || d.ortswehrIds.some(id => meineWehrIds.includes(id)) || fw.hatRecht('news_anlegen') || fw.hatRecht('news_bearbeiten') || fw.hatRecht('news_loeschen'))
+      .filter(d => !d.ortswehrIds?.length || d.ortswehrIds.some(id => meineWehrIds.includes(id)) || fw.isWehrfuehrer())
       .sort((a,b) => (b.erstelltAm?.toMillis?.() || 0) - (a.erstelltAm?.toMillis?.() || 0));
 
     // Automatisch archivieren wenn älter als 30 Tage
@@ -758,31 +639,13 @@ function renderEintrag(u, meineMap) {
   const heute = new Date(); heute.setHours(0,0,0,0);
   const morgen = new Date(heute); morgen.setDate(heute.getDate()+1);
   const istHeute = u.typ === 'einsatz' && d >= heute && d < morgen;
-  // Unvollständige Dienste/Einsätze nur für Kameraden mit dem jeweiligen Bearbeiten-Recht hervorheben
-  const istUnvollstaendig = !istHeute && (
-    (fw.hatRecht('dienste_bearbeiten') && dienstUnvollstaendig(u)) ||
-    (fw.hatRecht('einsaetze_bearbeiten') && einsatzUnvollstaendig(u))
-  );
-  // Gelbe Zeilen-Hervorhebung nur noch für "heute" (Einsatz) – bei Unvollständig bleibt
-  // ausschließlich das ⚠️ vor dem Titel als Hinweis, keine Zeilen-Einfärbung mehr.
-  let highlightStyle = '';
-  if (istHeute) highlightStyle = 'border-left:3px solid var(--red);padding-left:0.5rem;background:rgba(220,38,38,0.08);';
+  const highlightStyle = istHeute ? 'border-left:3px solid var(--red);padding-left:0.5rem;background:rgba(220,38,38,0.08);' : '';
   const nichtRelevantBadge = ''; // nicht relevant wird nicht in der Liste angezeigt
-  const artLabel = u.art ? dienstArtLabel(u.art) : '';
-  // MP-Feuer-Haken: ganz normales Recht (wie News sehen) – wer's nicht hat, sieht weder Status noch
-  // Knopf. Kleines klickbares Inline-Textbadge in der Sub-Zeile (kein Button/Kasten) – direkt
-  // umschaltbar, ohne extra ins Detail zu müssen, aber optisch dezent wie die alte reine Anzeige.
-  const mpRecht = u.typ === 'einsatz' ? 'einsaetze_mp_pruefen' : 'dienste_mp_pruefen';
-  const darfMp = fw.hatRecht(mpRecht);
-  const mpGeprueft = u.mpGeprueft === true;
-  const mpSpan = darfMp
-    ? `<span onclick="event.stopPropagation();mpUmschaltenListe(this,'${u.typ}','${u.id}',${!mpGeprueft})" style="cursor:pointer;font-weight:600;color:${mpGeprueft ? '#16a34a' : 'var(--red)'}">${mpGeprueft ? '✔ MP' : '✕ MP'}</span>`
-    : '';
   return `<div class="list-item" onclick="navigate('uebung-detail',{id:'${u.id}',typ:'${u.typ}'})" style="${highlightStyle}">
     <div class="list-item-body">
-      <div class="list-item-title">${istHeute ? '🚨 ' : ''}${istUnvollstaendig ? '⚠️ ' : ''}${u.titel}${nichtRelevantBadge}</div>
+      <div class="list-item-title">${istHeute ? '🚨 ' : ''}${u.titel}${nichtRelevantBadge}</div>
       ${u.ort ? `<div class="list-item-sub" style="margin-top:0.05rem">📍 ${u.ort}</div>` : ''}
-      <div class="list-item-sub">${datum(u.datum)}${zeitZeile(u) ? ' · '+zeitZeile(u) : ''}${artLabel ? ' · '+artLabel : ''}${u.typ !== 'einsatz' && u.relevant !== false ? ' · <span style="color:#22c55e;font-weight:600">40h</span>' : ''}${mpSpan ? ' · '+mpSpan : ''}</div>
+      <div class="list-item-sub">${datum(u.datum)}${zeitZeile(u) ? ' · '+zeitZeile(u) : ''}</div>
     </div>
     <div class="list-item-right">${badge}</div>
     <div class="list-chevron">›</div>
@@ -925,7 +788,7 @@ function col(typ) { return typ === 'einsatz' ? 'einsaetze' : 'dienste'; }
 // ── Einsätze ──────────────────────────────────────────────
 registerPage('einsaetze', async (el) => {
   fw.setTitle('Einsätze');
-  if (fw.hatRecht('einsaetze_anlegen')) fw.showHeaderAction('+ Einsatz', () => navigate('uebung-form', {typ:'einsatz', alarm:false}));
+  fw.showHeaderAction('+ Einsatz', () => navigate('uebung-form', {typ:'einsatz', alarm:false}));
   const [uSnap, aSnap] = await Promise.all([
     fw.getDocs('einsaetze', fw.orderBy('datum','desc')),
     fw.getDocs('anwesenheiten', fw.where('userId','==',fw.user.uid)),
@@ -939,52 +802,39 @@ registerPage('einsaetze', async (el) => {
 registerPage('dienste', async (el) => {
   fw.setTitle('Dienste');
   await ladeDienstFilter();
-  await ladeDienstarten();
-  if (fw.hatRecht('dienste_anlegen')) fw.showHeaderAction('+ Dienst', () => navigate('uebung-form', {typ:'dienst'}));
+  if (fw.isWehrfuehrer()) fw.showHeaderAction('+ Dienst', () => navigate('uebung-form', {typ:'dienst'}));
   const [uSnap, aSnap, dQualiSnap] = await Promise.all([
     fw.getDocs('dienste', fw.orderBy('datum','desc')),
     fw.getDocs('anwesenheiten', fw.where('userId','==',fw.user.uid)),
     fw.getDocs('users/'+fw.user.uid+'/qualifikationen'),
   ]);
   const dQualis  = dQualiSnap.docs.map(d => d.data());
-  const zeigeFahrzeugpruefungen = fw.hatRecht('fahrzeuge_anlegen') || fw.hatRecht('fahrzeuge_bearbeiten') || fw.hatRecht('fahrzeuge_loeschen')
-    || fw.hatRecht('pruefaufgaben_anlegen') || fw.hatRecht('pruefaufgaben_bearbeiten') || fw.hatRecht('pruefaufgaben_loeschen') || fw.hatRecht('pruefaufgaben_ergebnisse');
+  const istMaschinist = dQualis.some(q => (q.bezeichnung||'').toLowerCase().includes('maschinist'));
   const liste    = uSnap.docs.map(d => ({id:d.id,...d.data()})).filter(d => dienstSichtbar(d, fw.profil, dQualis));
   const meineMap = new Map(aSnap.docs.map(d => [d.data().uebungId, d.data().status]));
   el.innerHTML = `
     <div class="card">${renderEintragListe(liste, meineMap)}</div>
-    ${zeigeFahrzeugpruefungen ? `
-    <details id="fz-pruef-details" class="card" style="margin-top:0.8rem;padding:0">
+    ${(fw.isWehrfuehrer() || istMaschinist) ? `
+    <details class="card" style="margin-top:0.8rem;padding:0">
       <summary style="font-weight:600;cursor:pointer;list-style:none;display:flex;align-items:center;justify-content:space-between;padding:0.4rem 0.8rem;font-size:13px;border-radius:8px">
         <span>🔧 Fahrzeug- und Geräteprüfungen</span>
         <span style="color:var(--muted)">▾</span>
       </summary>
       <div id="pruef-inline" style="padding:0 0.8rem 0.8rem">⏳ Lade...</div>
     </details>` : ''}
-    ${fw.hatRecht('dienste_anlegen') ? `
+    ${fw.isWehrfuehrer() ? `
     <div style="margin-top:0.8rem">
       <button class="btn btn-secondary btn-sm btn-full" onclick="kalenderImportieren()" id="kal-btn">📅 Aus Google Kalender importieren</button>
       <div id="kal-status" class="muted" style="font-size:0.8rem;text-align:center;margin-top:0.4rem"></div>
-      <div id="kal-vorschau"></div>
     </div>` : ''}
   `;
-  if (zeigeFahrzeugpruefungen) ladePruefaufgabenInline();
+  if (fw.isWehrfuehrer() || istMaschinist) ladePruefaufgabenInline();
 });
 
-// Kalender-Import: lädt die Events NUR und zeigt sie zur Kontrolle an (kal-vorschau) – es wird
-// nichts automatisch in Firestore geschrieben. Erst mit "Ausgewählte übernehmen"
-// (kalenderImportUebernehmen) werden die angehakten Einträge tatsächlich angelegt/aktualisiert.
-// Grund: der Import kam bisher 1:1 durch, inkl. stillem Überschreiben bereits bearbeiteter Dienste
-// bei abweichenden Kerndaten – das soll jetzt sichtbar und bewusst passieren.
-let _kalVorschauDaten = null;
-
 window.kalenderImportieren = async () => {
-  const btn      = document.getElementById('kal-btn');
-  const status   = document.getElementById('kal-status');
-  const vorschau = document.getElementById('kal-vorschau');
+  const btn    = document.getElementById('kal-btn');
+  const status = document.getElementById('kal-status');
   btn.disabled = true; btn.textContent = '⏳ Wird geladen...';
-  status.textContent = '';
-  vorschau.innerHTML = '';
   try {
     const res = await fetch('https://europe-west3-ffw-oegeln-791ca.cloudfunctions.net/kalenderImport',
       { headers: { 'x-uid': fw.user.uid } });
@@ -993,56 +843,54 @@ window.kalenderImportieren = async () => {
 
     // Bestehende Dienste laden – Matching per Datum (YYYY-MM-DD)
     const snap = await fw.getDocs('dienste');
+    // Map: datum-String → {id, data}
     const vorhandeneMap = new Map(snap.docs.map(d => [
       d.data().datum?.toDate?.().toISOString().slice(0,10),
       { id: d.id, data: d.data() }
     ]));
 
-    // Nur klassifizieren (neu / geändert / unverändert), NICHT schreiben.
-    _kalVorschauDaten = events.map(e => {
+    let neu = 0, aktualisiert = 0, unveraendert = 0;
+    for (const e of events) {
       const bestehend = vorhandeneMap.get(e.datum);
-      if (!bestehend) return { ...e, status: 'neu' };
-      const alt = bestehend.data;
-      const diffs = [];
-      if (alt.titel !== e.titel) diffs.push(`Titel: "${alt.titel}" → "${e.titel}"`);
-      if ((alt.ort || '') !== (e.ort || '')) diffs.push(`Ort: "${alt.ort || '–'}" → "${e.ort || '–'}"`);
-      if ((alt.zeitBeginn || '') !== (e.zeitBeginn || '') || (alt.zeitEnde || '') !== (e.zeitEnde || ''))
-        diffs.push(`Zeit: ${alt.zeitBeginn || '–'}–${alt.zeitEnde || '–'} → ${e.zeitBeginn || '–'}–${e.zeitEnde || '–'} Uhr`);
-      if (Math.abs((alt.dauer_h || 0) - (e.dauer_h || 0)) > 0.01)
-        diffs.push(`Dauer: ${alt.dauer_h || 0}h → ${e.dauer_h || 0}h`);
-      if (!diffs.length) return { ...e, status: 'unveraendert' };
-      return { ...e, status: 'geaendert', diffs, bestehendId: bestehend.id };
-    });
+      const neuerEintrag = {
+        titel: e.titel, datum: new Date(e.datum),
+        dauer_h: e.dauer_h, beschreibung: e.beschreibung || '',
+        zeitBeginn: e.zeitBeginn || null, zeitEnde: e.zeitEnde || null,
+        ort: e.ort || null, typ: 'dienst',
+      };
 
-    const neuListe         = _kalVorschauDaten.filter(e => e.status === 'neu');
-    const geaendertListe   = _kalVorschauDaten.filter(e => e.status === 'geaendert');
-    const unveraendertListe = _kalVorschauDaten.filter(e => e.status === 'unveraendert');
-    btn.textContent = '📅 Aus Google Kalender importieren';
-    btn.disabled = false;
+      if (!bestehend) {
+        // Neu anlegen
+        await fw.addDoc('dienste', { ...neuerEintrag, erstelltVon: fw.user.uid, erstelltAm: new Date() });
+        neu++;
+      } else {
+        // Prüfen ob sich Kerndaten geändert haben
+        const alt = bestehend.data;
+        const geaendert =
+          alt.titel !== e.titel ||
+          (alt.ort || '') !== (e.ort || '') ||
+          (alt.zeitBeginn || '') !== (e.zeitBeginn || '') ||
+          (alt.zeitEnde || '') !== (e.zeitEnde || '') ||
+          Math.abs((alt.dauer_h || 0) - (e.dauer_h || 0)) > 0.01;
 
-    if (!neuListe.length && !geaendertListe.length) {
-      status.textContent = `Keine Änderungen (${unveraendertListe.length} bereits unverändert vorhanden)`;
-      _kalVorschauDaten = null;
-      return;
+        if (geaendert) {
+          // Nur Kerndaten updaten – Anwesenheiten bleiben unberührt
+          await fw.setDoc('dienste/' + bestehend.id, neuerEintrag);
+          aktualisiert++;
+        } else {
+          unveraendert++;
+        }
+      }
     }
 
-    const aktionable = _kalVorschauDaten
-      .map((e, idx) => ({ ...e, idx }))
-      .filter(e => e.status !== 'unveraendert');
-
-    vorschau.innerHTML = `
-      <div class="card" style="margin-top:0.6rem">
-        <div style="font-weight:600;margin-bottom:0.3rem">📅 Kalender-Vorschau</div>
-        <div class="muted" style="font-size:0.78rem;margin-bottom:0.5rem">
-          ${neuListe.length} neu · ${geaendertListe.length} geändert · ${unveraendertListe.length} unverändert (nicht angezeigt) –
-          bitte prüfen, was übernommen werden soll (⚠️ "Geändert" überschreibt einen bestehenden Dienst).
-        </div>
-        <div>${aktionable.map(e => kalEventZeile(e, e.idx)).join('')}</div>
-        <div style="display:flex;gap:0.5rem;margin-top:0.7rem">
-          <button class="btn btn-primary btn-sm" style="flex:1" onclick="kalenderImportUebernehmen()">✅ Ausgewählte übernehmen</button>
-          <button class="btn btn-secondary btn-sm" onclick="kalenderImportAbbrechen()">Abbrechen</button>
-        </div>
-      </div>`;
+    const teile = [];
+    if (neu > 0)          teile.push(neu + ' neu');
+    if (aktualisiert > 0) teile.push(aktualisiert + ' aktualisiert');
+    if (unveraendert > 0) teile.push(unveraendert + ' unverändert');
+    status.textContent = teile.join(' · ');
+    btn.textContent = '📅 Aus Google Kalender importieren';
+    btn.disabled = false;
+    if (neu > 0 || aktualisiert > 0) setTimeout(() => navigate('dienste'), 1200);
   } catch(e) {
     status.textContent = 'Fehler: ' + e.message;
     btn.textContent = '📅 Aus Google Kalender importieren';
@@ -1050,80 +898,16 @@ window.kalenderImportieren = async () => {
   }
 };
 
-// Eine Zeile der Kalender-Vorschau: "neu" ist standardmäßig angehakt (unkritisch, legt nur neu an),
-// "geändert" ist standardmäßig NICHT angehakt, weil es einen bestehenden Dienst überschreibt – der
-// Nutzer muss das bewusst anhaken, nachdem er den Diff darunter gelesen hat.
-function kalEventZeile(ev, idx) {
-  const istNeu  = ev.status === 'neu';
-  const icon    = istNeu ? '🆕' : '✏️';
-  const label   = istNeu ? 'Neu' : 'Geändert';
-  const farbe   = istNeu ? '#16a34a' : '#f59e0b';
-  const checked = istNeu ? 'checked' : '';
-  const diffHtml = ev.diffs?.length
-    ? `<div style="font-size:0.75rem;color:var(--muted);margin-top:0.25rem">${ev.diffs.map(d => `<div>${d}</div>`).join('')}</div>`
-    : '';
-  return `<label style="display:flex;align-items:flex-start;gap:0.6rem;padding:0.55rem 0;border-bottom:1px solid var(--border);cursor:pointer">
-    <input type="checkbox" id="kal-cb-${idx}" ${checked} style="margin-top:0.2rem;flex-shrink:0">
-    <div style="flex:1;min-width:0">
-      <div style="font-weight:600;font-size:0.88rem">${ev.titel}</div>
-      <div style="font-size:0.78rem;color:var(--muted);margin-top:0.1rem">${datum(ev.datum)}${ev.zeitBeginn ? ' · '+ev.zeitBeginn+(ev.zeitEnde ? '–'+ev.zeitEnde : '')+' Uhr' : ''}${ev.ort ? ' · '+ev.ort : ''} · <span style="color:${farbe};font-weight:600">${icon} ${label}</span></div>
-      ${diffHtml}
-    </div>
-  </label>`;
-}
-
-// Schreibt nur die in der Vorschau angehakten Einträge nach Firestore.
-window.kalenderImportUebernehmen = async () => {
-  if (!_kalVorschauDaten) return;
-  const btn = document.querySelector('#kal-vorschau .btn-primary');
-  if (btn) { btn.disabled = true; btn.textContent = '⏳ Wird übernommen...'; }
-  try {
-    let neu = 0, aktualisiert = 0;
-    for (let idx = 0; idx < _kalVorschauDaten.length; idx++) {
-      const ev = _kalVorschauDaten[idx];
-      if (ev.status === 'unveraendert') continue;
-      const cb = document.getElementById('kal-cb-'+idx);
-      if (!cb || !cb.checked) continue;
-      const eintrag = {
-        titel: ev.titel, datum: new Date(ev.datum),
-        dauer_h: ev.dauer_h, beschreibung: ev.beschreibung || '',
-        zeitBeginn: ev.zeitBeginn || null, zeitEnde: ev.zeitEnde || null,
-        ort: ev.ort || null, typ: 'dienst',
-      };
-      if (ev.status === 'neu') {
-        await fw.addDoc('dienste', { ...eintrag, erstelltVon: fw.user.uid, erstelltAm: new Date() });
-        neu++;
-      } else {
-        // Merge statt Overwrite (fw.setDoc nutzt { merge: true }) – andere Felder wie Art,
-        // Bemerkung oder MP-Haken bleiben unberührt, Anwesenheiten sowieso.
-        await fw.setDoc('dienste/' + ev.bestehendId, eintrag);
-        aktualisiert++;
-      }
-    }
-    const teile = [];
-    if (neu > 0)          teile.push(neu + ' neu');
-    if (aktualisiert > 0) teile.push(aktualisiert + ' aktualisiert');
-    document.getElementById('kal-status').textContent = teile.length ? teile.join(' · ') : 'Nichts ausgewählt';
-    document.getElementById('kal-vorschau').innerHTML = '';
-    _kalVorschauDaten = null;
-    if (neu > 0 || aktualisiert > 0) setTimeout(() => navigate('dienste'), 1200);
-  } catch(e) {
-    fw.toast('Fehler: ' + e.message, true);
-    if (btn) { btn.disabled = false; btn.textContent = '✅ Ausgewählte übernehmen'; }
-  }
-};
-
-window.kalenderImportAbbrechen = () => {
-  document.getElementById('kal-vorschau').innerHTML = '';
-  document.getElementById('kal-status').textContent = '';
-  _kalVorschauDaten = null;
-};
-
 
 function hatLkwFs(fs) {
   if (!fs) return false;
   return /\b(C1E|C1|CE|C)\b/.test(fs.toUpperCase());
 }
+
+window.rolleGeaendert = (rolle) => {
+  const row = document.getElementById('staerke-rolle-row');
+  if (row) row.style.display = rolle === 'wehrfuehrer' ? 'block' : 'none';
+};
 
 window.einsatzReagieren = async (uebungId, status) => {
   const name = kurzName(fw.profil.vorname, fw.profil.nachname);
@@ -1136,22 +920,22 @@ window.einsatzReagieren = async (uebungId, status) => {
     const eSnap = await fw.getDoc('einsaetze/'+uebungId);
     if (eSnap.exists()) { typ = 'einsatz'; datum = eSnap.data().datum?.toDate?.() || new Date(); dauer_h = eSnap.data().dauer_h || 0; }
   }
-  const rolle = await staerkeKategorieVon(fw.user.uid);
   const snap = await fw.getDocs('anwesenheiten',
     fw.where('uebungId','==',uebungId), fw.where('userId','==',fw.user.uid));
   if (snap.docs.length > 0) {
     await fw.updateDoc('anwesenheiten/'+snap.docs[0].id, {
-      status, typ, datum, dauer_h, rolle,
+      status, typ, datum, dauer_h,
+      rolle: fw.profil.staerkeRolle || fw.profil.rolle || 'kamerad',
       fuehrerschein: fw.profil.fuehrerschein || '', aktualisiertAm: new Date()
     });
   } else {
     await fw.addDoc('anwesenheiten', {
-      uebungId, userId: fw.user.uid, userName: name, typ, datum, dauer_h, rolle,
+      uebungId, userId: fw.user.uid, userName: name, typ, datum, dauer_h,
+      rolle: fw.profil.staerkeRolle || fw.profil.rolle || 'kamerad',
       fuehrerschein: fw.profil.fuehrerschein || '',
       status, gemeldetAm: new Date(),
     });
   }
-  if (typ === 'einsatz') await pruefeBereitschaftAutoEndzeit(uebungId);
 };
 
 
@@ -1161,73 +945,31 @@ let _einsatzListener = null; // aktiver onSnapshot Listener
 registerPage('uebung-detail', async (el, {id, typ}) => {
   // alten Listener aufräumen
   if (_einsatzListener) { _einsatzListener(); _einsatzListener = null; }
-  // Selbstheilung: pruefeBereitschaftAutoEndzeit() läuft sonst nur reaktiv bei einer neuen
-  // Reaktion/Umschaltung. Ältere Einsätze, die schon vor dieser Funktion (oder ohne seitdem
-  // erfolgte Änderung) auf "nur Bereitschaft" standen, holen die automatische Endzeit hier beim
-  // Öffnen der Detailseite nach.
-  if ((typ || 'dienst') === 'einsatz') await pruefeBereitschaftAutoEndzeit(id);
-  const navCol = (typ || 'dienst') === 'einsatz' ? 'einsaetze' : 'dienste';
-  const [snap, owSnap, navSnap] = await Promise.all([
+  const [snap, owSnap] = await Promise.all([
     fw.getDoc(col(typ||'dienst')+'/'+id),
     fw.getDocs('ortswehren'),
-    fw.getDocs(navCol),
   ]);
   if (!snap.exists()) { el.innerHTML='<div class="empty">Nicht gefunden</div>'; return; }
   const u = {id,...snap.data()};
   const owMap = new Map(owSnap.docs.map(d => [d.id, d.data().name]));
-
-  // Vorheriger/Nächster: nur innerhalb des gleichen Typs (Dienst bleibt unter Diensten, Einsatz
-  // unter Einsätzen) chronologisch durchblättern, damit man beim Abarbeiten (z. B. MP-Kontrolle)
-  // nicht jedes Mal in die Liste zurück muss.
-  const navListe = navSnap.docs.map(d => ({id:d.id, typ:u.typ, datum:d.data().datum}))
-    .sort((a,b) => {
-      const da = a.datum?.toDate ? a.datum.toDate() : new Date(a.datum);
-      const db = b.datum?.toDate ? b.datum.toDate() : new Date(b.datum);
-      return da - db;
-    });
-  const navIdx = navListe.findIndex(x => x.id === u.id);
-  const navVorheriger = navIdx > 0 ? navListe[navIdx-1] : null;
-  const navNaechster  = navIdx >= 0 && navIdx < navListe.length-1 ? navListe[navIdx+1] : null;
-  const navBtn = (eintrag, label) => eintrag
-    ? `<button class="btn btn-secondary btn-sm" onclick="navigate('uebung-detail',{id:'${eintrag.id}',typ:'${eintrag.typ}'})">${label}</button>`
-    : `<span></span>`;
-  const navZeile = (navVorheriger || navNaechster)
-    ? `<div style="display:flex;justify-content:space-between;gap:0.5rem;margin-bottom:0.6rem">
-        ${navBtn(navVorheriger, '‹ Vorheriger')}
-        ${navBtn(navNaechster, 'Nächster ›')}
-      </div>`
-    : '';
   const isEinsatz = u.typ === 'einsatz';
-  const bearbRecht = isEinsatz ? 'einsaetze_bearbeiten' : 'dienste_bearbeiten';
-  const teilnRecht = isEinsatz ? 'einsaetze_teilnahme_verwalten' : 'dienste_teilnahme_verwalten';
-  const mpRecht    = isEinsatz ? 'einsaetze_mp_pruefen' : 'dienste_mp_pruefen';
-  const bemerkungRecht = isEinsatz ? 'einsaetze_bemerkungen' : 'dienste_bemerkungen';
-  if (!isEinsatz) await ladeDienstarten();
   fw.setTitle(isEinsatz ? 'Einsatz' : 'Dienst');
   fw.showBack(() => navigate(isEinsatz ? 'einsaetze' : 'dienste'));
-  if (fw.hatRecht(bearbRecht)) fw.showHeaderAction('✏️ Edit', () => navigate('uebung-form',{id, typ: u.typ}));
-
-  // MP-Feuer-Haken und Bemerkung: ganz normale Rechte (wie News sehen) – nur für Berechtigte sichtbar.
-  const darfMp = fw.hatRecht(mpRecht);
-  const mpGeprueft = darfMp && u.mpGeprueft === true;
-  const darfBemerkung = fw.hatRecht(bemerkungRecht);
+  if (fw.isWehrfuehrer()) fw.showHeaderAction('✏️ Edit', () => navigate('uebung-form',{id, typ: u.typ}));
 
   const aSnap = await fw.getDocs('anwesenheiten',
     fw.where('uebungId','==',id), fw.where('userId','==',fw.user.uid));
   const meineA = aSnap.docs[0] ? {id:aSnap.docs[0].id,...aSnap.docs[0].data()} : null;
 
   const eintragNavFn = `navigate('uebung-eintragen',{id:'${id}',titel:'${u.titel.replace(/'/g,"\'")}',dauer:${u.dauer_h||0},typ:'${u.typ}',datumStr:'${u.datum?.toDate?.().toISOString()||u.datum}'})`;
-  const eintragBtn = fw.hatRecht(teilnRecht)
+  const eintragBtn = fw.isWehrfuehrer()
     ? `<button class="btn btn-secondary btn-sm" onclick="${eintragNavFn}">+ Kamerad eintragen</button>`
     : '';
 
   el.innerHTML = `
-    ${navZeile}
     <div class="card">
       <div style="font-weight:600;font-size:1.1rem">${u.titel}</div>
-      <div style="margin-top:0.3rem;color:var(--muted);font-size:0.85rem">${datum(u.datum)}${zeitZeile(u) ? ' · '+zeitZeile(u) : ''}${!isEinsatz && u.art ? ' · '+dienstArtLabel(u.art) : ''}${!isEinsatz && u.relevant !== false ? ' · <span style="color:#22c55e;font-weight:600">40h</span>' : ''}</div>
-      ${!isEinsatz && fw.hatRecht(bearbRecht) && dienstUnvollstaendig(u) ? `<div style="margin-top:0.4rem;padding:0.4rem 0.6rem;background:rgba(245,158,11,0.12);border:1px solid rgba(245,158,11,0.4);border-radius:8px;color:#f59e0b;font-size:0.8rem;font-weight:600">⚠️ Unvollständig – bitte fehlende Angaben (z. B. Dienst-Art) nachtragen</div>` : ''}
-      ${isEinsatz && fw.hatRecht(bearbRecht) && einsatzUnvollstaendig(u) ? `<div style="margin-top:0.4rem;padding:0.4rem 0.6rem;background:rgba(245,158,11,0.12);border:1px solid rgba(245,158,11,0.4);border-radius:8px;color:#f59e0b;font-size:0.8rem;font-weight:600">⚠️ Unvollständig – bitte fehlende Angaben (z. B. Endzeit oder Ort) nachtragen</div>` : ''}
+      <div style="margin-top:0.3rem;color:var(--muted);font-size:0.85rem">${datum(u.datum)}${zeitZeile(u) ? ' · '+zeitZeile(u) : ''}${!isEinsatz && u.relevant !== false ? ' · <span style="color:#22c55e;font-weight:600">40h</span>' : ''}</div>
       ${u.beschreibung ? `<p class="muted" style="margin-top:0.4rem;font-size:0.85rem">${u.beschreibung}</p>` : ''}
       ${u.ortswehrIds?.length > 1 ? `<div style="margin-top:0.4rem;font-size:0.78rem;color:var(--muted)">Beteiligte Wehren: ${u.ortswehrIds.map(id => owMap.get(id)||id).join(', ')}</div>` : ''}
       <div id="ort-anzeige">${u.ort ? `<div style="margin-top:0.5rem;display:flex;align-items:center;gap:0.5rem;flex-wrap:wrap">
@@ -1237,7 +979,7 @@ registerPage('uebung-detail', async (el, {id, typ}) => {
           🗺 Navigation
         </a>` : ''}
       </div>` : ''}</div>
-      ${isEinsatz && !u.zeitEnde && fw.hatRecht(bearbRecht) ? `
+      ${isEinsatz && !u.zeitEnde && fw.isWehrfuehrer() ? `
         <button class="btn btn-secondary btn-sm" style="margin-top:0.6rem" onclick="navigate('uebung-form',{id:'${u.id}',typ:'einsatz'})">⏱ Endzeit nachtragen</button>
       ` : ''}
       ${isEinsatz && !u.ort ? `
@@ -1257,24 +999,7 @@ registerPage('uebung-detail', async (el, {id, typ}) => {
         style="background:#dc2626;color:#fff;font-size:1rem;padding:0.6rem"
         onclick="einsatzReagieren('${id}','kommt_nicht')">👎 Komme nicht</button>
     </div>
-    ${fw.hatRecht(teilnRecht) ? `<div style="padding:0 0 0.5rem">${eintragBtn}</div>` : ''}
-    ${(darfMp || darfBemerkung) ? `
-    <div class="card" style="margin-top:0.8rem">
-      ${darfMp ? `
-        <label style="display:flex;align-items:center;gap:0.5rem;cursor:pointer;font-size:0.85rem">
-          <input type="checkbox" id="mp-checkbox" ${mpGeprueft ? 'checked' : ''} onchange="mpUmschalten('${u.typ}','${id}',this.checked)">
-          In MP-Feuer überprüft
-        </label>
-      ` : ''}
-      ${darfBemerkung ? `
-        <div style="${darfMp ? 'margin-top:0.6rem' : ''}">
-          <label style="font-size:0.82rem;color:var(--muted)">Bemerkung (nur für Berechtigte sichtbar)</label>
-          <textarea id="bemerkung-feld" rows="3" style="width:100%;background:var(--panel2);border:1px solid var(--border);border-radius:8px;padding:0.5rem;font-size:0.85rem;color:var(--text);resize:vertical;margin-top:0.3rem">${u.bemerkung||''}</textarea>
-          <button class="btn btn-secondary btn-sm" style="margin-top:0.3rem" onclick="bemerkungSpeichern('${u.typ}','${id}')">💾 Bemerkung speichern</button>
-        </div>
-      ` : ''}
-    </div>
-    ` : ''}
+    ${fw.isWehrfuehrer() ? `<div style="padding:0 0 0.5rem">${eintragBtn}</div>` : ''}
   `;
 
   // Autocomplete für inline Adress-Eingabe (Detail-Seite, kein <script> in innerHTML)
@@ -1305,39 +1030,26 @@ registerPage('uebung-detail', async (el, {id, typ}) => {
 
   // Live-Listener für Reaktionen (Einsatz + Dienst)
   if (true) {
-    // usersMap + agtMap + staerkeMap: beim Start laden und bei jedem Snapshot neu laden
-    let usersMap   = new Map();
-    let agtMap     = new Map();
-    let staerkeMap = new Map();
-    // Stichtag für Stärke-/AGT-Berechnung: das Datum DIESES Einsatzes/Dienstes, nicht "heute" –
-    // sonst zeigen alte Einsätze rückwirkend die aktuelle Qualifikation der Kameraden an, statt
-    // die, die sie zum Zeitpunkt des Einsatzes tatsächlich hatten.
-    const bezugsDatum = u.datum?.toDate ? u.datum.toDate() : new Date(u.datum);
+    // usersMap + agtMap: beim Start laden und bei jedem Snapshot neu laden
+    let usersMap = new Map();
+    let agtMap   = new Map();
     const ladeProfilDaten = async () => {
       const usersSnap = await fw.getDocs('users');
       usersMap = new Map(usersSnap.docs.map(d => [d.id, d.data()]));
-      agtMap     = new Map();
-      staerkeMap = new Map();
+      agtMap   = new Map();
       await Promise.all(usersSnap.docs.map(async d => {
         const profil = d.data();
         const qSnap = await fw.getDocs('users/'+d.id+'/qualifikationen');
-        const qualis = qSnap.docs.map(q => q.data());
-        staerkeMap.set(d.id, staerkeKategorie(qualis, bezugsDatum));
-        const hatAgt = qualis.some(q => {
-          const bez = (q.bezeichnung||q.titel||q.name||'').toLowerCase();
-          return bez.includes('agt') && (!q.datum || new Date(q.datum) <= bezugsDatum);
-        });
+        const hatAgt = qSnap.docs.some(q => (q.data().bezeichnung||q.data().titel||q.data().name||'').toLowerCase().includes('agt'));
         if (!hatAgt) return;
-        // AGT nur aktiv, wenn alle 3 Nachweise zum Bezugsdatum bereits erbracht (nicht erst danach)
-        // und noch gültig waren (G26 ≤ 3 Jahre, Übungen ≤ 1 Jahr vor dem Bezugsdatum).
-        const j3 = new Date(bezugsDatum); j3.setFullYear(bezugsDatum.getFullYear()-3); j3.setHours(0,0,0,0);
-        const j1 = new Date(bezugsDatum); j1.setFullYear(bezugsDatum.getFullYear()-1); j1.setHours(0,0,0,0);
+        // AGT nur aktiv wenn alle 3 Nachweise gültig
+        const heute = new Date();
+        const j3 = new Date(); j3.setFullYear(heute.getFullYear()-3); j3.setHours(0,0,0,0);
+        const j1 = new Date(); j1.setFullYear(heute.getFullYear()-1); j1.setHours(0,0,0,0);
         const unt  = profil.agt_untersuchung ? new Date(profil.agt_untersuchung) : null;
         const waer = profil.agt_waermeuebung ? new Date(profil.agt_waermeuebung) : null;
         const bel  = profil.agt_belastung    ? new Date(profil.agt_belastung)    : null;
-        const agtAktiv = unt && unt <= bezugsDatum && unt >= j3
-          && waer && waer <= bezugsDatum && waer >= j1
-          && bel && bel <= bezugsDatum && bel >= j1;
+        const agtAktiv = unt && unt >= j3 && waer && waer >= j1 && bel && bel >= j1;
         if (agtAktiv) agtMap.set(d.id, true);
       }));
     };
@@ -1351,49 +1063,37 @@ registerPage('uebung-detail', async (el, {id, typ}) => {
         const alle = snap.docs.map(d => {
           const a = {id:d.id,...d.data()};
           const profil = usersMap.get(a.userId) || {};
-          a.rolle         = staerkeMap.get(a.userId) || a.rolle || 'kamerad';
+          a.rolle         = profil.staerkeRolle || profil.rolle || a.rolle || 'kamerad';
           a.fuehrerschein = profil.fuehrerschein || a.fuehrerschein || '';
           return a;
         });
-        // "Bereitschaft" = sagt zu, bleibt aber in der Wache und rückt nicht mit dem Fahrzeug aus.
-        const kommenAusruecken   = alle.filter(a => a.status === 'kommt' || a.status === 'bestaetigt');
-        const kommenBereitschaft = alle.filter(a => a.status === 'bereitschaft');
-        const kommenAlle         = [...kommenAusruecken, ...kommenBereitschaft];
-        const kommenNicht        = alle.filter(a => a.status === 'kommt_nicht');
-        const meineR             = alle.find(a => a.userId === fw.user.uid);
+        const kommen      = alle.filter(a => a.status === 'kommt' || a.status === 'bestaetigt');
+        const kommenNicht = alle.filter(a => a.status === 'kommt_nicht');
+        const meineR      = alle.find(a => a.userId === fw.user.uid);
 
         const normRolle = r => [...(r||'').trim().toLowerCase()]
           .map(ch => ({'ü':'ue','ö':'oe','ä':'ae','ß':'ss'}[ch]||ch)).join('');
-        const zugf  = kommenAlle.filter(a => normRolle(a.rolle) === 'zugfuehrer').length;
-        const gruf  = kommenAlle.filter(a => normRolle(a.rolle) === 'gruppenfuehrer').length;
-        const kamf  = kommenAlle.filter(a => normRolle(a.rolle) !== 'zugfuehrer' && normRolle(a.rolle) !== 'gruppenfuehrer').length;
-        const agtZ  = kommenAlle.filter(a => agtMap.get(a.userId)).length;
+        const zugf  = kommen.filter(a => normRolle(a.rolle) === 'zugfuehrer').length;
+        const gruf  = kommen.filter(a => normRolle(a.rolle) === 'gruppenfuehrer').length;
+        const kamf  = kommen.filter(a => normRolle(a.rolle) !== 'zugfuehrer' && normRolle(a.rolle) !== 'gruppenfuehrer').length;
+        const agtZ  = kommen.filter(a => agtMap.get(a.userId)).length;
         const zaehler = document.getElementById('einsatz-zaehler');
         if (zaehler) zaehler.textContent = isEinsatz
-          ? `👍 ${kommenAlle.length}  👎 ${kommenNicht.length}  ·  Stärke: ${zugf}/${gruf}/${kamf}  ·  AGT: ${agtZ}`
-          : `👍 ${kommenAlle.length}  👎 ${kommenNicht.length}`;
+          ? `👍 ${kommen.length}  👎 ${kommenNicht.length}  ·  Stärke: ${zugf}/${gruf}/${kamf}  ·  AGT: ${agtZ}`
+          : `👍 ${kommen.length}  👎 ${kommenNicht.length}`;
 
         const container = document.getElementById('einsatz-reaktionen');
         if (container) {
-          const rows = [...kommenAlle, ...kommenNicht].map(a => {
-            const bereitschaft = a.status === 'bereitschaft';
+          const rows = [...kommen, ...kommenNicht].map(a => {
             const kommt = a.status === 'kommt' || a.status === 'bestaetigt';
             const lkw = kommt && hatLkwFs(a.fuehrerschein);
-            const agt = isEinsatz && (kommt || bereitschaft) && agtMap.get(a.userId);
-            const icon = (kommt || bereitschaft) ? `👍${bereitschaft ? '🏠' : ''}` : '👎';
-            // Bereitschaft wird erst am Gerätehaus entschieden – daher erst nachträglich
-            // umschaltbar, nicht als Erstreaktion. Eigene Zeile oder Teilnahme-Verwalter.
-            const darfUmschalten = isEinsatz && (kommt || bereitschaft) && (a.userId === fw.user.uid || fw.hatRecht(teilnRecht));
-            const umschaltBtn = !darfUmschalten ? '' : bereitschaft
-              ? `<button onclick="bereitschaftUmschalten('${a.id}','kommt','${id}')" style="background:none;cursor:pointer;font-size:0.72rem;padding:0.15rem 0.4rem;color:var(--blue);border:1px solid var(--border);border-radius:6px" title="Zurück auf Ausrücken">🚛 Ausrücken</button>`
-              : `<button onclick="bereitschaftUmschalten('${a.id}','bereitschaft','${id}')" style="background:none;cursor:pointer;font-size:0.72rem;padding:0.15rem 0.4rem;color:var(--blue);border:1px solid var(--border);border-radius:6px" title="Auf Bereitschaft setzen">🏠 Bereitschaft</button>`;
-            const loeschBtn = fw.hatRecht(teilnRecht)
+            const agt = isEinsatz && kommt && agtMap.get(a.userId);
+            const loeschBtn = fw.isWehrfuehrer()
               ? `<button onclick="teilnehmerEntfernen('${a.id}','${id}','${u.typ}')" style="background:none;border:none;cursor:pointer;font-size:0.9rem;color:#9ca3af;padding:0.1rem 0.3rem" title="Entfernen">🗑</button>`
               : '';
             return `<div style="display:flex;align-items:center;gap:0.6rem;padding:0.4rem 0;border-bottom:1px solid var(--border)">
-              <span style="font-size:1.1rem">${icon}${lkw?'🚛':''}${agt?'💨':''}</span>
+              <span style="font-size:1.1rem">${kommt?'👍':'👎'}${lkw?'🚛':''}${agt?'💨':''}</span>
               <span style="flex:1;font-weight:${a.userId===fw.user.uid?'600':'400'}">${kurzName(usersMap.get(a.userId)?.vorname, usersMap.get(a.userId)?.nachname) || a.userName || 'Kamerad'}</span>
-              ${umschaltBtn}
               ${loeschBtn}
             </div>`;
           }).join('');
@@ -1402,8 +1102,10 @@ registerPage('uebung-detail', async (el, {id, typ}) => {
 
         const btnK  = document.getElementById('btn-kommt');
         const btnKN = document.getElementById('btn-kommt-nicht');
-        if (btnK)  btnK.style.opacity  = (meineR?.status === 'kommt' || meineR?.status === 'bereitschaft') ? '1' : '0.5';
-        if (btnKN) btnKN.style.opacity = meineR?.status === 'kommt_nicht' ? '1' : '0.5';
+        if (btnK && btnKN) {
+          btnK.style.opacity  = meineR?.status === 'kommt'       ? '1' : '0.5';
+          btnKN.style.opacity = meineR?.status === 'kommt_nicht' ? '1' : '0.5';
+        }
       },
       fw.where('uebungId','==',id)
     );
@@ -1411,75 +1113,6 @@ registerPage('uebung-detail', async (el, {id, typ}) => {
     window._einsatzListener = _einsatzListener;
   }
 });
-
-// Nachträgliches Umschalten zwischen "rückt aus" und "Bereitschaft" (bleibt in der Wache).
-// Wird erst am Gerätehaus entschieden, daher kein Teil der Erstreaktion.
-window.bereitschaftUmschalten = async (aId, neuerStatus, uebungId) => {
-  await fw.updateDoc('anwesenheiten/'+aId, { status: neuerStatus });
-  fw.toast(neuerStatus === 'bereitschaft' ? 'Auf Bereitschaft gesetzt 🏠' : 'Auf Ausrücken gesetzt 🚛');
-  if (uebungId) await pruefeBereitschaftAutoEndzeit(uebungId);
-};
-
-// Automatische Endzeit für Einsätze: Sind ALLE Zusagenden ("Daumen hoch") gleichzeitig auf
-// Bereitschaft (niemand rückt tatsächlich mit dem Fahrzeug aus), wird die Endzeit automatisch
-// auf Beginn + 15 Minuten gesetzt – sonst bliebe der Einsatz ohne manuelles Nachtragen als
-// "unvollständig" (fehlende Endzeit) stehen, obwohl klar ist, dass er nach 15 Min. beendet ist.
-// zeitEndeAuto:true markiert eine so gesetzte Endzeit als automatisch, damit sie wieder entfernt
-// werden kann, falls doch noch jemand ausrückt. Eine von der Einsatzleitung manuell eingetragene
-// Endzeit (zeitEndeAuto nicht gesetzt) wird davon nie überschrieben oder entfernt.
-window.pruefeBereitschaftAutoEndzeit = async (uebungId) => {
-  const [eSnap, aSnap] = await Promise.all([
-    fw.getDoc('einsaetze/'+uebungId),
-    fw.getDocs('anwesenheiten', fw.where('uebungId','==',uebungId)),
-  ]);
-  if (!eSnap.exists()) return;
-  const e = eSnap.data();
-  const alle = aSnap.docs.map(d => d.data());
-  const ausrueckend  = alle.filter(a => a.status === 'kommt' || a.status === 'bestaetigt');
-  const bereitschaft = alle.filter(a => a.status === 'bereitschaft');
-  // "Alle Daumen hoch auf Bereitschaft" = es gibt mindestens eine Zusage, und niemand davon rückt aus
-  const sollAutoEnde = (ausrueckend.length + bereitschaft.length) > 0 && ausrueckend.length === 0 && !!e.zeitBeginn;
-
-  if (sollAutoEnde && (!e.zeitEnde || e.zeitEndeAuto === true)) {
-    const [bh, bm] = e.zeitBeginn.split(':').map(Number);
-    const endeMin  = bh*60 + bm + 15;
-    const zeitEnde = `${String(Math.floor(endeMin/60)%24).padStart(2,'0')}:${String(endeMin%60).padStart(2,'0')}`;
-    if (e.zeitEnde !== zeitEnde) {
-      await fw.updateDoc('einsaetze/'+uebungId, { zeitEnde, zeitEndeAuto: true, dauer_h: 0.25 });
-    }
-  } else if (!sollAutoEnde && e.zeitEndeAuto === true) {
-    await fw.updateDoc('einsaetze/'+uebungId, { zeitEnde: null, zeitEndeAuto: false, dauer_h: null });
-  }
-};
-
-// MP-Feuer-Haken: Feld direkt auf dienste/einsaetze, wie ein ganz normales Recht (z. B. News
-// sehen) – nur wer dienste_mp_pruefen/einsaetze_mp_pruefen hat, bekommt Checkbox und Badge zu sehen.
-window.mpUmschalten = async (typ, id, geprueft) => {
-  await fw.updateDoc(col(typ)+'/'+id, { mpGeprueft: geprueft, mpGeprueftAm: new Date(), mpGeprueftVon: fw.user.uid });
-  fw.toast(geprueft ? 'In MP-Feuer überprüft ✅' : 'Haken entfernt');
-};
-
-// Direkter Umschalt-Knopf in der Übersicht (renderEintrag): ruft dieselbe Firestore-Logik wie die
-// Detail-Checkbox auf, aktualisiert danach nur den eigenen Knopf statt die ganze Liste neu zu laden.
-window.mpUmschaltenListe = async (el, typ, id, geprueft) => {
-  el.style.pointerEvents = 'none';
-  try {
-    await mpUmschalten(typ, id, geprueft);
-    el.textContent = geprueft ? '✔ MP' : '✕ MP';
-    el.style.color = geprueft ? '#16a34a' : 'var(--red)';
-    el.setAttribute('onclick', `event.stopPropagation();mpUmschaltenListe(this,'${typ}','${id}',${!geprueft})`);
-  } finally {
-    el.style.pointerEvents = '';
-  }
-};
-
-// Bemerkung: Feld direkt auf dienste/einsaetze, wie ein ganz normales Recht – nur wer
-// dienste_bemerkungen/einsaetze_bemerkungen hat, bekommt Feld und Aufgaben-Eintrag zu sehen.
-window.bemerkungSpeichern = async (typ, id) => {
-  const text = document.getElementById('bemerkung-feld')?.value || '';
-  await fw.updateDoc(col(typ)+'/'+id, { bemerkung: text, bemerkungAm: new Date(), bemerkungVon: fw.user.uid });
-  fw.toast('Bemerkung gespeichert ✅');
-};
 
 window.teilnahmeMelden = async (uebungId, titel, dauer_h, typ, datumStr) => {
   const name = kurzName(fw.profil.vorname, fw.profil.nachname);
@@ -1489,242 +1122,56 @@ window.teilnahmeMelden = async (uebungId, titel, dauer_h, typ, datumStr) => {
     dauer_h, typ, datum: new Date(datumStr), vorgeschlagenAm: new Date(),
   });
   fw.toast('Teilnahme gemeldet ⏳');
-  navigateReplace('uebung-detail', {id: uebungId, typ});
+  navigate('uebung-detail', {id: uebungId, typ});
 };
 window.teilnehmerEntfernen = async (aId, uebungId, typ) => {
   if (!confirm('Anwesenheit entfernen?')) return;
   await fw.deleteDoc('anwesenheiten/'+aId);
-  if (typ === 'einsatz') await pruefeBereitschaftAutoEndzeit(uebungId);
-  fw.toast('Entfernt'); navigateReplace('uebung-detail', {id: uebungId, typ});
+  fw.toast('Entfernt'); navigate('uebung-detail', {id: uebungId, typ});
 };
 
 // ── Kamerad direkt eintragen ──────────────────────────────
 registerPage('uebung-eintragen', async (el, {id, titel, dauer, typ, datumStr}) => {
   fw.setTitle('Eintragen');
   fw.showBack(() => navigateBack());
-  const [usersSnap, bereitsSnap, uebungSnap] = await Promise.all([
+  const [usersSnap, bereitsSnap] = await Promise.all([
     fw.getDocs('users'),
     fw.getDocs('anwesenheiten', fw.where('uebungId','==',id)),
-    fw.getDoc(col(typ)+'/'+id),
   ]);
-  const uebung = uebungSnap.exists() ? uebungSnap.data() : {};
-  // Bemerkung: gleiches Recht wie in der Detail-Ansicht – nur für Berechtigte sichtbar.
-  const bemerkungRecht = typ === 'einsatz' ? 'einsaetze_bemerkungen' : 'dienste_bemerkungen';
-  const darfBemerkung = fw.hatRecht(bemerkungRecht);
   const bereits = new Set(bereitsSnap.docs.map(d => d.data().userId));
   const verfuegbar = usersSnap.docs.map(d => ({id:d.id,...d.data()}))
-    .filter(k => !bereits.has(k.id) && k.aktiv !== false)
+    .filter(u => !bereits.has(u.id) && u.aktiv !== false)
     .sort((a,b) => (a.nachname||'').localeCompare(b.nachname||''));
   el.innerHTML = `
     <div class="card">
       <div class="card-title">Kamerad eintragen</div>
-      <p class="muted" style="font-size:0.85rem;margin-bottom:0.8rem">${uebung.titel || titel || ''}</p>
+      <p class="muted" style="font-size:0.85rem;margin-bottom:0.8rem">${titel}</p>
       ${verfuegbar.length===0 ? '<div class="empty">Alle bereits eingetragen</div>' :
-        verfuegbar.map(k => `
+        verfuegbar.map(u => `
           <div class="list-item">
             <div class="list-item-body">
-              <div class="list-item-title">${k.nachname||''}, ${k.vorname||''}</div>
-              <div class="list-item-sub">${k.dienstgrad||'–'}</div>
+              <div class="list-item-title">${u.nachname||''}, ${u.vorname||''}</div>
+              <div class="list-item-sub">${u.dienstgrad||'–'}</div>
             </div>
-            <button class="btn btn-sm btn-success" onclick="direktEintragen('${id}','${k.id}','${kurzName(k.vorname,k.nachname)}',${dauer},'${typ}','${datumStr}')">Eintragen</button>
+            <button class="btn btn-sm btn-success" onclick="direktEintragen('${id}','${u.id}','${kurzName(u.vorname,u.nachname)}',${dauer},'${typ}','${datumStr}')">Eintragen</button>
           </div>`).join('')}
-    </div>
-    ${darfBemerkung ? `
-      <div class="card" style="margin-top:0.8rem">
-        <label style="font-size:0.82rem;color:var(--muted)">Bemerkung (nur für Berechtigte sichtbar)</label>
-        <textarea id="bemerkung-feld" rows="3" style="width:100%;background:var(--panel2);border:1px solid var(--border);border-radius:8px;padding:0.5rem;font-size:0.85rem;color:var(--text);resize:vertical;margin-top:0.3rem">${uebung.bemerkung||''}</textarea>
-        <button class="btn btn-secondary btn-sm" style="margin-top:0.3rem" onclick="bemerkungSpeichern('${typ}','${id}')">💾 Bemerkung speichern</button>
-      </div>
-    ` : ''}`;
+    </div>`;
 });
 
 window.direktEintragen = async (uebungId, userId, name, dauer_h, typ, datumStr) => {
-  // Profil laden damit fuehrerschein mitgespeichert wird, Stärke-Kategorie aus Lehrgängen ableiten
-  const [userSnap, rolle] = await Promise.all([
-    fw.getDoc('users/' + userId),
-    staerkeKategorieVon(userId),
-  ]);
+  // Profil laden damit fuehrerschein + rolle mitgespeichert werden
+  const userSnap = await fw.getDoc('users/' + userId);
   const profil = userSnap.exists() ? userSnap.data() : {};
   await fw.addDoc('anwesenheiten', {
     uebungId, userId, userName: name, status:'kommt',
     dauer_h, typ, datum: new Date(datumStr), bestaetigtAm: new Date(),
-    rolle,
+    rolle: profil.staerkeRolle || profil.rolle || 'kamerad',
     fuehrerschein: profil.fuehrerschein || '',
   });
-  if (typ === 'einsatz') await pruefeBereitschaftAutoEndzeit(uebungId);
   fw.toast(name+' eingetragen ✅');
-  // Seite neu laden damit neue Anwesenheit sofort sichtbar - navigateReplace() statt navigate(),
-  // sonst legt sich bei jedem eingetragenen Kameraden ein weiterer History-Eintrag drauf und der
-  // Zurück-Pfeil "hängt" (springt erst nach mehreren Klicks wirklich zum Einsatz zurück).
-  navigateReplace('uebung-eintragen', {id: uebungId, titel: '', dauer: dauer_h, typ, datumStr});
+  // Seite neu laden damit neue Anwesenheit sofort sichtbar
+  navigate('uebung-eintragen', {id: uebungId, titel: '', dauer: dauer_h, typ, datumStr});
 };
-
-// ── Dienst-Arten (dynamisch aus Firestore, Collection "dienstarten") ──
-let _dienstarten = [];
-let _dienstartenGeladen = false;
-async function ladeDienstarten() {
-  if (_dienstartenGeladen) return _dienstarten;
-  try {
-    let snap = await fw.getDocs('dienstarten');
-    // Einmalige Migration: bisherige fest codierte Dienst-Arten anlegen.
-    // Nur Wehrführer dürfen laut Firestore-Regeln in "dienstarten" schreiben – bei Kameraden
-    // schlägt der Schreibversuch fehl, darum hier vorher prüfen statt die Seite abstürzen zu lassen.
-    if (snap.empty && fw.isWehrfuehrer()) {
-      // IDs sind fortlaufende Zahlen (als String), unabhängig von der Bezeichnung –
-      // so bleibt die Bezeichnung jederzeit umbenennbar, ohne bestehende Dienst-Zuordnungen zu verlieren.
-      const defaults = [
-        { id: '1', bezeichnung: 'Dienstabend',          relevant: true,  sortierung: 1 },
-        { id: '2', bezeichnung: 'Fortbildung',          relevant: true,  sortierung: 2 },
-        { id: '3', bezeichnung: 'Kameradschaftspflege', relevant: false, sortierung: 3 },
-        { id: '4', bezeichnung: 'Training',             relevant: false, sortierung: 4 },
-      ];
-      try {
-        await Promise.all(defaults.map(d =>
-          fw.setDoc('dienstarten/'+d.id, { bezeichnung: d.bezeichnung, relevant: d.relevant, sortierung: d.sortierung })
-        ));
-        snap = await fw.getDocs('dienstarten');
-      } catch(e) { /* Migration fehlgeschlagen (z.B. Regeln noch nicht deployed) – ohne Absturz weitermachen */ }
-    }
-    _dienstarten = snap.docs
-      .map(d => ({id: d.id, ...d.data()}))
-      .sort((a,b) => (a.sortierung||99) - (b.sortierung||99));
-  } catch(e) {
-    // Lesen fehlgeschlagen (z.B. Firestore-Regeln noch nicht deployed) – App darf trotzdem weiterlaufen
-    _dienstarten = [];
-  }
-  _dienstartenGeladen = true;
-  return _dienstarten;
-}
-function dienstArtLabel(wert) {
-  return _dienstarten.find(a => a.id === wert)?.bezeichnung || '';
-}
-function dienstArtRelevant(wert) {
-  return _dienstarten.find(a => a.id === wert)?.relevant ?? true;
-}
-// Pflichtfelder für einen vollständigen Dienst (nicht Einsatz)
-function dienstUnvollstaendig(u) {
-  if (u.typ !== 'dienst') return false;
-  if (!u.titel) return true;
-  if (!u.datum) return true;
-  if (!u.dauer_h || u.dauer_h <= 0) return true;
-  if (!u.art) return true;
-  return false;
-}
-// Pflichtfelder für einen vollständigen Einsatz (nicht Dienst) – ohne Endzeit lässt sich
-// keine Dauer berechnen (relevant für die Stunden-Anrechnung), ohne Ort fehlt der Einsatzort.
-function einsatzUnvollstaendig(u) {
-  if (u.typ !== 'einsatz') return false;
-  if (!u.titel) return true;
-  if (!u.datum) return true;
-  if (!u.zeitEnde) return true;
-  if (!u.ort) return true;
-  return false;
-}
-
-// ── Rollen-/Rechtekonzept ──────────────────────────────────
-// Katalog aller granularen Einzelrechte, gruppiert nach Bereich (für die Rang-Verwaltung).
-// Wehrführer hat unabhängig davon immer alle Rechte (siehe fw.hatRecht()).
-const RECHTE_KATALOG = [
-  { bereich: 'Dienste', rechte: [
-    { key: 'dienste_anlegen',              label: 'Anlegen' },
-    { key: 'dienste_bearbeiten',           label: 'Bearbeiten' },
-    { key: 'dienste_loeschen',             label: 'Löschen' },
-    { key: 'dienste_teilnahme_verwalten',  label: 'Teilnahme anderer eintragen/löschen' },
-    { key: 'dienste_mp_pruefen',           label: 'MP-Feuer-Haken setzen (nur für Berechtigte sichtbar)' },
-    { key: 'dienste_bemerkungen',          label: 'Bemerkung sehen/bearbeiten (nur für Berechtigte sichtbar)' },
-  ]},
-  { bereich: 'Einsätze', rechte: [
-    { key: 'einsaetze_anlegen',              label: 'Anlegen' },
-    { key: 'einsaetze_bearbeiten',           label: 'Bearbeiten' },
-    { key: 'einsaetze_loeschen',             label: 'Löschen' },
-    { key: 'einsaetze_teilnahme_verwalten',  label: 'Teilnahme anderer eintragen/löschen' },
-    { key: 'einsaetze_alarm_ausloesen',      label: 'Alarm auslösen' },
-    { key: 'einsaetze_mp_pruefen',           label: 'MP-Feuer-Haken setzen (nur für Berechtigte sichtbar)' },
-    { key: 'einsaetze_bemerkungen',          label: 'Bemerkung sehen/bearbeiten (nur für Berechtigte sichtbar)' },
-  ]},
-  { bereich: 'Kameraden', rechte: [
-    { key: 'kameraden_ansehen',               label: 'Namensliste ansehen' },
-    { key: 'kameraden_anlegen',               label: 'Neu anlegen' },
-    { key: 'kameraden_stammdaten',            label: 'Stammdaten bearbeiten' },
-    { key: 'kameraden_aktiv_inaktiv',         label: 'Aktiv/Inaktiv setzen' },
-    { key: 'kameraden_loeschen',              label: 'Löschen' },
-    { key: 'kameraden_lehrgaenge_verwalten',  label: 'Lehrgänge/Qualifikationen anderer verwalten' },
-    { key: 'kameraden_raenge_zuweisen',       label: 'Ränge zuweisen' },
-  ]},
-  { bereich: 'Fahrzeuge', rechte: [
-    { key: 'fahrzeuge_anlegen',    label: 'Anlegen' },
-    { key: 'fahrzeuge_bearbeiten', label: 'Bearbeiten' },
-    { key: 'fahrzeuge_loeschen',   label: 'Löschen' },
-  ]},
-  { bereich: 'Prüfaufgaben', rechte: [
-    { key: 'pruefaufgaben_anlegen',    label: 'Anlegen' },
-    { key: 'pruefaufgaben_bearbeiten', label: 'Bearbeiten' },
-    { key: 'pruefaufgaben_loeschen',   label: 'Löschen' },
-    { key: 'pruefaufgaben_ergebnisse', label: 'Prüfergebnisse eintragen' },
-  ]},
-  { bereich: 'News', rechte: [
-    { key: 'news_sehen',       label: 'Sehen' },
-    { key: 'news_anlegen',     label: 'Anlegen' },
-    { key: 'news_bearbeiten',  label: 'Bearbeiten' },
-    { key: 'news_loeschen',    label: 'Löschen/Archivieren' },
-  ]},
-  { bereich: 'Offene Aufgaben', rechte: [
-    { key: 'aufgaben_kameraden',  label: 'Kameraden-Aufgaben sehen (fehlende Angaben, Lehrgänge, AGT, Erste-Hilfe)' },
-    { key: 'aufgaben_dienste',    label: 'Unvollständige Dienste/Einsätze sehen' },
-    { key: 'aufgaben_fahrzeuge',  label: 'Fahrzeug-/Prüfaufgaben-Probleme sehen' },
-    // Passwort-Reset-Aufgaben bleiben bewusst WF-exklusiv, kein eigenes Recht (siehe kannPwResetAufgaben)
-  ]},
-  { bereich: 'Stammdaten & Einstellungen', rechte: [
-    { key: 'stammdaten_dienstarten',     label: 'Dienst-Arten' },
-    { key: 'stammdaten_lehrgangsarten',  label: 'Lehrgangsarten' },
-    { key: 'stammdaten_dienstgrade',     label: 'Dienstgrade' },
-    { key: 'stammdaten_ortswehren',      label: 'Ortswehren' },
-    { key: 'stammdaten_raenge',          label: 'Ränge selbst bearbeiten' },
-  ]},
-  { bereich: 'Statistik/Verwaltung', rechte: [
-    { key: 'statistik_sehen',    label: 'Statistik sehen' },
-    { key: 'verwaltung_sehen',   label: 'Verwaltungsseite sehen' },
-  ]},
-];
-
-let _raenge = [];
-let _raengeGeladen = false;
-async function ladeRaenge() {
-  if (_raengeGeladen) return _raenge;
-  try {
-    let snap = await fw.getDocs('raenge');
-    // Einmalige Migration: ein neutraler Basis-Rang ohne Rechte, damit die Verwaltung
-    // nie komplett leer ist. Nur Wehrführer dürfen laut Regeln in "raenge" schreiben.
-    if (snap.empty && fw.isWehrfuehrer()) {
-      try {
-        await fw.setDoc('raenge/1', { bezeichnung: 'Kamerad', rechte: {}, sortierung: 1 });
-        snap = await fw.getDocs('raenge');
-      } catch(e) { /* Regeln evtl. noch nicht deployed – ohne Absturz weitermachen */ }
-    }
-    _raenge = snap.docs
-      .map(d => ({id: d.id, ...d.data()}))
-      .sort((a,b) => (a.sortierung||99) - (b.sortierung||99));
-  } catch(e) {
-    _raenge = [];
-  }
-  _raengeGeladen = true;
-  return _raenge;
-}
-function rangLabel(id) {
-  return _raenge.find(r => r.id === id)?.bezeichnung || '';
-}
-
-let _standardRangId = null;
-let _standardRangGeladen = false;
-async function ladeStandardRang() {
-  if (_standardRangGeladen) return _standardRangId;
-  try {
-    const snap = await fw.getDoc('einstellungen/raenge');
-    _standardRangId = snap.exists() ? (snap.data().standardRangId || null) : null;
-  } catch(e) { _standardRangId = null; }
-  _standardRangGeladen = true;
-  return _standardRangId;
-}
 
 // ── Einsatz / Dienst Form ─────────────────────────────────
 registerPage('uebung-form', async (el, {id, typ: vorTyp, alarm: mitAlarm}) => {
@@ -1732,17 +1179,11 @@ registerPage('uebung-form', async (el, {id, typ: vorTyp, alarm: mitAlarm}) => {
   if (id) { const s = await fw.getDoc(col(vorTyp||'dienst')+'/'+id); if (!s.exists()) { const s2 = await fw.getDoc(col('einsatz')+'/'+id); if(s2.exists()) u={id,...s2.data()}; } else { u={id,...s.data()}; } }
   const selTyp = u?.typ || vorTyp || 'dienst';
   const isEinsatz = selTyp === 'einsatz';
-  const anlegenOk    = isEinsatz ? (fw.hatRecht('einsaetze_anlegen') || fw.hatRecht('einsaetze_alarm_ausloesen')) : fw.hatRecht('dienste_anlegen');
-  const bearbeitenOk = fw.hatRecht(isEinsatz ? 'einsaetze_bearbeiten' : 'dienste_bearbeiten');
-  const loeschenRecht = isEinsatz ? 'einsaetze_loeschen' : 'dienste_loeschen';
-  if (!(u ? bearbeitenOk : anlegenOk)) { navigate('dashboard'); return; }
   fw.setTitle(u ? 'Bearbeiten' : (isEinsatz ? 'Einsatz melden' : 'Neuer Dienst'));
   fw.showBack(() => navigateBack());
 
   const datumVal = u?.datum?.toDate ? u.datum.toDate().toISOString().slice(0,10)
     : new Date().toISOString().slice(0,10);
-
-  if (!isEinsatz) await ladeDienstarten();
 
   if (isEinsatz) {
     const jetztH  = new Date().getHours().toString().padStart(2,'0');
@@ -1754,9 +1195,9 @@ registerPage('uebung-form', async (el, {id, typ: vorTyp, alarm: mitAlarm}) => {
         <input type="hidden" id="f-alarm" value="${mitAlarm ? '1' : '0'}">
         <div class="btn-row" style="margin-top:0;margin-bottom:0.75rem">
           <button class="btn btn-primary btn-full" onclick="uebungSpeichern('${id||''}','einsatz')">${u ? '💾 Speichern' : mitAlarm ? '🚨 Einsatz melden & Alarm senden' : '💾 Einsatz speichern'}</button>
-          ${u && fw.hatRecht(loeschenRecht) ? `<button class="btn btn-danger" onclick="uebungLoeschen('${id}','einsatz')">🗑 Löschen</button>` : ''}
+          ${u ? `<button class="btn btn-danger" onclick="uebungLoeschen('${id}','einsatz')">🗑 Löschen</button>` : ''}
         </div>
-        ${u && fw.hatRecht('einsaetze_alarm_ausloesen') ? `<button class="btn btn-secondary btn-full" style="margin-bottom:0.75rem" onclick="einsatzNachbenachrichtigen('${id}')">🔔 Benachrichtigung erneut senden</button>` : ''}
+        ${u ? `<button class="btn btn-secondary btn-full" style="margin-bottom:0.75rem" onclick="einsatzNachbenachrichtigen('${id}')">🔔 Benachrichtigung erneut senden</button>` : ''}
         <input id="f-titel" value="${u?.titel||''}" placeholder="Einsatzstichwort" style="margin-bottom:0.5rem" autofocus>
         ${u ? `<div class="form-row" style="margin-bottom:0.5rem"><label>Datum</label><input id="f-datum" type="date" value="${datumVal}"></div>` : ''}
         <div class="ac-wrapper" style="position:relative;margin-bottom:0.5rem">
@@ -1790,12 +1231,6 @@ registerPage('uebung-form', async (el, {id, typ: vorTyp, alarm: mitAlarm}) => {
         <div class="form-row"><label>Titel</label>
           <input id="f-titel" value="${u?.titel||''}" placeholder="Monatsübung April…">
         </div>
-        <div class="form-row"><label>Art</label>
-          <select id="f-art">
-            <option value="" ${!u?.art?'selected':''} disabled>– Bitte wählen –</option>
-            ${_dienstarten.map(a => `<option value="${a.id}" ${u?.art===a.id?'selected':''}>${a.bezeichnung}${a.relevant?' (zählt zu den 40h)':''}</option>`).join('')}
-          </select>
-        </div>
         <div class="form-row"><label>Datum</label><input id="f-datum" type="date" value="${datumVal}"></div>
         <div class="form-row"><label>Beginn</label><input id="f-beginn" type="time" value="${u?.zeitBeginn||''}" oninput="berechneDauer()"></div>
         <div class="form-row"><label>Ende</label><input id="f-ende" type="time" value="${u?.zeitEnde||''}" oninput="berechneDauer()"></div>
@@ -1822,9 +1257,14 @@ registerPage('uebung-form', async (el, {id, typ: vorTyp, alarm: mitAlarm}) => {
             </div>
           </div>`;
         })()}
+        ${fw.isWehrfuehrer() ? `
+        <div style="display:flex;align-items:center;gap:0.6rem;padding:0.4rem 0;border-top:1px solid var(--border);margin-top:0.2rem">
+          <input type="checkbox" id="f-relevant" style="width:1.2rem;height:1.2rem;accent-color:var(--red)" ${u?.relevant===false?'':'checked'}>
+          <label for="f-relevant" style="font-size:0.88rem;cursor:pointer">Zählt für 40-Stunden-Ziel</label>
+        </div>` : ''}
         <div class="btn-row">
           <button class="btn btn-primary" onclick="uebungSpeichern('${id||''}','dienst')">${u ? '💾 Speichern' : '💾 Speichern & Benachrichtigen'}</button>
-          ${u && fw.hatRecht(loeschenRecht) ? `<button class="btn btn-danger" onclick="uebungLoeschen('${id}','dienst')">🗑 Löschen</button>` : ''}
+          ${u ? `<button class="btn btn-danger" onclick="uebungLoeschen('${id}','dienst')">🗑 Löschen</button>` : ''}
         </div>
       </div>`;
   }
@@ -1834,7 +1274,10 @@ window.berechneDauer = () => {
   const b = document.getElementById('f-beginn')?.value;
   const e = document.getElementById('f-ende')?.value;
   if (!b || !e) return;
-  document.getElementById('f-dauer').value = dauerAusZeiten(b, e);
+  const [bh, bm] = b.split(':').map(Number);
+  const [eh, em] = e.split(':').map(Number);
+  const diff = (eh * 60 + em) - (bh * 60 + bm);
+  if (diff > 0) document.getElementById('f-dauer').value = Math.round(diff / 60 * 100) / 100;
 };
 
 window.uebungSpeichern = async (id, forcTyp) => {
@@ -1849,28 +1292,23 @@ window.uebungSpeichern = async (id, forcTyp) => {
   const zeitBeginn = document.getElementById('f-beginn')?.value || null;
   const zeitEnde   = document.getElementById('f-ende')?.value || null;
 
-  // Dauer aus Zeiten berechnen wenn vorhanden (mit Mitternachts-Überlauf, siehe dauerAusZeiten)
+  // Dauer aus Zeiten berechnen wenn vorhanden
   if (isEinsatz && zeitBeginn && zeitEnde) {
-    dauer_h = dauerAusZeiten(zeitBeginn, zeitEnde);
+    const [bh, bm] = zeitBeginn.split(':').map(Number);
+    const [eh, em] = zeitEnde.split(':').map(Number);
+    dauer_h = Math.round(((eh*60+em) - (bh*60+bm)) / 60 * 100) / 100;
   }
 
   if (!titel) { fw.toast('Stichwort erforderlich', true); return; }
 
-  const art = document.getElementById('f-art')?.value || null;
-  if (!isEinsatz && !art) { fw.toast('Bitte Dienst-Art auswählen', true); return; }
-
   const ort = document.getElementById('f-ort')?.value?.trim() || null;
-  // 40h-Relevanz kommt jetzt ausschließlich aus der gewählten Dienst-Art, keine manuelle Checkbox mehr
-  const relevant = isEinsatz ? true : dienstArtRelevant(art);
+  const relevantEl = document.getElementById('f-relevant');
+  const relevant = isEinsatz ? true : (relevantEl ? relevantEl.checked : true);
   // Ortswehren: aus Checkboxen oder primäre Wehr des Nutzers
   const wehrCheckboxen = [...document.querySelectorAll('.f-wehr-cb:checked')].map(cb => cb.value);
   const ortswehrIds = wehrCheckboxen.length > 0 ? wehrCheckboxen
     : (fw.profil.ortswehrIds?.length ? fw.profil.ortswehrIds : (fw.profil.ortswehrId ? [fw.profil.ortswehrId] : []));
   const data = { titel, datum: new Date(datumStr), typ, dauer_h, beschreibung: beschr, zeitBeginn, zeitEnde, ort, relevant, ortswehrIds };
-  if (!isEinsatz) data.art = art;
-  // Manuell im Formular gespeicherte Endzeit ist keine automatische Bereitschafts-Endzeit mehr –
-  // Flag zurücksetzen, damit pruefeBereitschaftAutoEndzeit() diesen Wert nie wieder anfasst.
-  if (isEinsatz) data.zeitEndeAuto = false;
   const isNeu = !id;
   try {
     let uebungId = id;
@@ -1881,13 +1319,10 @@ window.uebungSpeichern = async (id, forcTyp) => {
       uebungId = ref.id;
     }
     const mitAlarmFlag = document.getElementById('f-alarm')?.value === '1';
-  if (isNeu && mitAlarmFlag) await benachrichtigeOrtswehr(typ, titel, datumStr, dauer_h, uebungId, ortswehrIds);
-  else if (isNeu && !mitAlarmFlag && typ === 'dienst') await benachrichtigeOrtswehr(typ, titel, datumStr, dauer_h, uebungId, ortswehrIds);
+  if (isNeu && mitAlarmFlag) await benachrichtigeOrtswehr(typ, titel, datumStr, dauer_h, uebungId);
+  else if (isNeu && !mitAlarmFlag && typ === 'dienst') await benachrichtigeOrtswehr(typ, titel, datumStr, dauer_h, uebungId);
     fw.toast('Gespeichert ✅');
-    // Beim Bearbeiten zurück in den Einsatz/Dienst selbst (nicht in die Liste) – beim Neuanlegen
-    // gibt es noch keine sinnvolle Detailansicht zum Zurückspringen, daher weiterhin die Liste.
-    if (isNeu) navigate(typ === 'einsatz' ? 'einsaetze' : 'dienste');
-    else navigate('uebung-detail', {id: uebungId, typ});
+    navigate(typ === 'einsatz' ? 'einsaetze' : 'dienste');
   } catch(e) { fw.toast(e.message, true); }
 };
 
@@ -1945,29 +1380,21 @@ window.ortSpeichern = async (einsatzId) => {
 };
 
 window.uebungLoeschen = async (id, typ) => {
-  if (!confirm('Wirklich löschen? Zugehörige Anwesenheiten werden mitgelöscht.')) return;
-  // Verwaiste Anwesenheiten vermeiden: zuerst alle zugehörigen Einträge mitlöschen
-  const anwSnap = await fw.getDocs('anwesenheiten', fw.where('uebungId','==',id));
-  await Promise.all(anwSnap.docs.map(d => fw.deleteDoc('anwesenheiten/'+d.id)));
+  if (!confirm('Wirklich löschen?')) return;
   await fw.deleteDoc(col(typ)+'/'+id);
   fw.toast('Gelöscht'); navigate(typ === 'einsatz' ? 'einsaetze' : 'dienste');
 };
 
 // ── Push ──────────────────────────────────────────────────
-async function benachrichtigeOrtswehr(typ, titel, datumStr, dauer_h, uebungId, zielOrtswehrIds) {
-  // Ziel = die für DIESEN Dienst/Einsatz ausgewählten Ortswehren (nicht die des Absenders!).
-  // Sonst werden bei Kameraden mit mehreren Ortswehren die falschen bzw. keine Empfänger benachrichtigt,
-  // weil bisher nur die erste Ortswehr des Absenders (ortswehrIds[0]) als Filter verwendet wurde.
-  let ortswehrIds = zielOrtswehrIds?.length ? zielOrtswehrIds : [];
-  if (!ortswehrIds.length) {
-    ortswehrIds = fw.profil.ortswehrIds?.length ? fw.profil.ortswehrIds : (fw.profil.ortswehrId ? [fw.profil.ortswehrId] : []);
-  }
-  if (!ortswehrIds.length) {
+async function benachrichtigeOrtswehr(typ, titel, datumStr, dauer_h, uebungId) {
+  const ortswehrIds = fw.profil.ortswehrIds?.length ? fw.profil.ortswehrIds : (fw.profil.ortswehrId ? [fw.profil.ortswehrId] : []);
+  const ortswehrId = ortswehrIds[0] || null;
+  if (!ortswehrId) {
     fw.toast('⚠️ Keine Ortswehr zugeordnet – niemand wird benachrichtigt!', true);
     return;
   }
   // Alle User die mindestens eine der betroffenen Wehren haben
-  const usersSnap = await fw.getDocs('users', fw.where('ortswehrIds', 'array-contains-any', ortswehrIds.slice(0,10)));
+  const usersSnap = await fw.getDocs('users', fw.where('ortswehrIds', 'array-contains', ortswehrId));
   const isEinsatz = typ === 'einsatz';
   const tokens = [];
   for (const d of usersSnap.docs) {
@@ -2002,7 +1429,7 @@ window.einsatzNachbenachrichtigen = async (id) => {
   const snap = await fw.getDoc('einsaetze/'+id);
   if (!snap.exists()) { fw.toast('Einsatz nicht gefunden', true); return; }
   const u = snap.data();
-  await benachrichtigeOrtswehr('einsatz', u.titel, u.datum, u.dauer_h, id, u.ortswehrIds);
+  await benachrichtigeOrtswehr('einsatz', u.titel, u.datum, u.dauer_h, id);
 };
 
 // ── Deep Link ─────────────────────────────────────────────
@@ -2019,7 +1446,6 @@ function checkDeepLink() {
 registerPage('profil', async (el) => {
   fw.setTitle('Mein Profil');
   await ladeLehrgangsarten();
-  await ladeDienstarten();
   // Immer frisch laden damit notif-Felder aktuell sind
   const [meSnap, qSnap, aSnap, pDiensteSnap, pEinsaetzeSnap, planSnap, owSnap] = await Promise.all([
     fw.getDoc('users/'+fw.user.uid),
@@ -2040,83 +1466,43 @@ registerPage('profil', async (el) => {
   const pDienstMap  = new Map(pDiensteSnap.docs.map(d => [d.id, d.data()]));
   const pEinsatzMap = new Map(pEinsaetzeSnap.docs.map(d => [d.id, d.data()]));
   const stats  = getStats(aSnap.docs.map(d => d.data()), pDienstMap, pEinsatzMap);
-  const { diensteListe, einsaetzeListe } = meineEintraegeListen(aSnap.docs.map(d => d.data()), pDienstMap, pEinsatzMap);
 
   el.innerHTML = `
     <div class="card" style="display:flex;align-items:center;gap:0.8rem;padding:0.9rem 1rem">
       <div style="font-size:1.4rem">${stats.ziel?'✅':'⚠️'}</div>
       <div>
-        <div style="font-weight:600;font-size:0.95rem">${stats.ziel?'Du bist versichert!':'Derzeit nicht versichert.'}</div>
-        <div style="font-size:0.8rem;color:var(--muted);margin-top:0.1rem">${dauerFormat(stats.stunden12mZiel)}h / 40:00h (12 Mon.)</div>
+        <div style="font-weight:600;font-size:0.95rem">${stats.ziel?'40-Stunden-Ziel erreicht':'40-Stunden-Ziel nicht erreicht'}</div>
+        <div style="font-size:0.8rem;color:var(--muted);margin-top:0.1rem">${dauerFormat(stats.stunden12m)}h dieses Jahr · ${dauerFormat(stats.stunden12mZiel)}h / 40:00h (12 Mon.)</div>
       </div>
     </div>
     <div class="stats-grid">
-      <div class="stat-card"><div class="stat-zahl">${dauerFormat(stats.dienstRelevant)}h</div><div class="stat-label">Dienststunden ${new Date().getFullYear()}</div></div>
+      <div class="stat-card"><div class="stat-zahl">${dauerFormat(stats.gesamtDienst)}h</div><div class="stat-label">Dienststunden ${new Date().getFullYear()}</div></div>
       <div class="stat-card"><div class="stat-zahl">${stats.dienste}</div><div class="stat-label">${stats.dienste===1?'Dienst':'Dienste'} ${new Date().getFullYear()}</div></div>
       <div class="stat-card"><div class="stat-zahl">${dauerFormat(stats.gesamtEinsatz)}h</div><div class="stat-label">Einsatzstunden ${new Date().getFullYear()}</div></div>
       <div class="stat-card"><div class="stat-zahl">${stats.einsaetze}</div><div class="stat-label">${stats.einsaetze===1?'Einsatz':'Einsätze'} ${new Date().getFullYear()}</div></div>
     </div>
 
-    <details class="card" style="padding:0">
-      <summary class="section-header" style="margin:1.2rem 0 0;padding:0.6rem 1rem;cursor:pointer;list-style:none;display:flex;align-items:center;justify-content:space-between">
-        <span>Meine Dienste (letzte 12 Monate)</span>
-        <span style="color:var(--muted);font-size:0.9rem">▾</span>
-      </summary>
-      <div style="padding:0 1rem 0.4rem">
-        ${diensteListe.length === 0 ? '<div class="empty" style="padding:0.6rem 0">Keine Dienste in den letzten 12 Monaten</div>' :
-          diensteListe.map(e => `
-            <div class="list-item" style="cursor:pointer" onclick="navigate('uebung-detail',{id:'${e.id}',typ:'dienst'})">
-              <div class="list-item-body">
-                <div class="list-item-title">${e.titel}</div>
-                <div class="list-item-sub">${datum(e.datum)}${e.art ? ' · '+dienstArtLabel(e.art) : ''}${e.relevant ? ' · <span style="color:#22c55e">40h</span>' : ''} · ${dauerFormat(e.dauer_h)}h</div>
-              </div>
+    <div class="section-header">Dienstlich</div>
+    <div class="card">
+      <div style="display:flex;gap:1.2rem;flex-wrap:wrap">
+        <div><div class="muted" style="font-size:0.72rem">Dienstgrad</div><div class="bold">${me.dienstgrad||'–'}</div></div>
+        <div><div class="muted" style="font-size:0.72rem">Eingetreten</div><div class="bold">${datum(me.eintrittsdatum)||'–'}</div></div>
+        <div><div class="muted" style="font-size:0.72rem">Ortswehr</div><div class="bold">${meineWehrNamen}</div></div>
+        ${me.fuehrerschein ? `<div><div class="muted" style="font-size:0.72rem">Führerschein</div><div class="bold">${me.fuehrerschein}</div></div>` : ''}
+      </div>
+      <hr>
+      <div class="card-title" style="margin-bottom:0.5rem">Lehrgänge</div>
+      ${renderQualisProfil(qualis, me)}
+      ${planung.length ? `
+        <div style="margin-top:0.5rem;padding-top:0.5rem">
+          ${planung.sort((a,b) => (a.datum||'').localeCompare(b.datum||'')).map((p,i) => `
+            <div style="display:flex;align-items:center;gap:0.5rem;padding:0.35rem 0;${i > 0 ? 'border-top:1px solid var(--border)' : ''}">
+              <div style="flex:1;font-size:0.85rem;color:var(--muted)">${p.lehrgang}</div>
+              <div style="font-size:0.78rem;color:var(--muted)">${p.datum ? (([y,m,d]) => `${d}.${m}.${y}`)(p.datum.split('-')) : String(p.jahr||'')} · geplant</div>
+              <button onclick="planungLoeschenDirekt('${p.id}')" class="btn btn-sm btn-danger">🗑</button>
             </div>`).join('')}
-      </div>
-    </details>
-
-    <details class="card" style="padding:0">
-      <summary class="section-header" style="margin:1.2rem 0 0;padding:0.6rem 1rem;cursor:pointer;list-style:none;display:flex;align-items:center;justify-content:space-between">
-        <span>Meine Einsätze ${new Date().getFullYear()}</span>
-        <span style="color:var(--muted);font-size:0.9rem">▾</span>
-      </summary>
-      <div style="padding:0 1rem 0.4rem">
-        ${einsaetzeListe.length === 0 ? `<div class="empty" style="padding:0.6rem 0">Keine Einsätze ${new Date().getFullYear()}</div>` :
-          einsaetzeListe.map(e => `
-            <div class="list-item" style="cursor:pointer" onclick="navigate('uebung-detail',{id:'${e.id}',typ:'einsatz'})">
-              <div class="list-item-body">
-                <div class="list-item-title">${e.titel}</div>
-                <div class="list-item-sub">${datum(e.datum)} · ${dauerFormat(e.dauer_h)}h</div>
-              </div>
-            </div>`).join('')}
-      </div>
-    </details>
-
-    <details class="card" style="padding:0">
-      <summary class="section-header" style="margin:1.2rem 0 0;padding:0.6rem 1rem;cursor:pointer;list-style:none;display:flex;align-items:center;justify-content:space-between">
-        <span>Dienstlich</span>
-        <span style="color:var(--muted);font-size:0.9rem">▾</span>
-      </summary>
-      <div style="padding:0 1rem 1rem">
-        <div style="display:flex;gap:1.2rem;flex-wrap:wrap">
-          <div><div class="muted" style="font-size:0.72rem">Dienstgrad</div><div class="bold">${me.dienstgrad||'–'}</div></div>
-          <div><div class="muted" style="font-size:0.72rem">Eingetreten</div><div class="bold">${datum(me.eintrittsdatum)||'–'}</div></div>
-          <div><div class="muted" style="font-size:0.72rem">Ortswehr</div><div class="bold">${meineWehrNamen}</div></div>
-          ${me.fuehrerschein ? `<div><div class="muted" style="font-size:0.72rem">Führerschein</div><div class="bold">${me.fuehrerschein}</div></div>` : ''}
-        </div>
-        <hr>
-        <div class="card-title" style="margin-bottom:0.5rem">Lehrgänge</div>
-        ${renderQualisProfil(qualis, me)}
-        ${planung.length ? `
-          <div style="margin-top:0.5rem;padding-top:0.5rem">
-            ${planung.sort((a,b) => (a.datum||'').localeCompare(b.datum||'')).map((p,i) => `
-              <div style="display:flex;align-items:center;gap:0.5rem;padding:0.35rem 0;${i > 0 ? 'border-top:1px solid var(--border)' : ''}">
-                <div style="flex:1;font-size:0.85rem;color:var(--muted)">${p.lehrgang}</div>
-                <div style="font-size:0.78rem;color:var(--muted)">${p.datum ? (([y,m,d]) => `${d}.${m}.${y}`)(p.datum.split('-')) : String(p.jahr||'')} · geplant</div>
-                <button onclick="planungLoeschenDirekt('${p.id}')" class="btn btn-sm btn-danger">🗑</button>
-              </div>`).join('')}
-          </div>` : ''}
-      </div>
-    </details>
+        </div>` : ''}
+    </div>
 
     <div class="section-header">Passwort ändern</div>
     <div class="card">
@@ -2230,7 +1616,7 @@ window.planungLoeschenDirekt = async (id) => {
   if (!confirm('Eintrag löschen?')) return;
   await fw.deleteDoc('lehrgangsplanung/'+id);
   fw.toast('Gelöscht');
-  navigateReplace(window._currentPage, window._currentParams);
+  navigate(window._currentPage, window._currentParams);
 };
 
 window.abmelden = async () => {
@@ -2356,7 +1742,7 @@ registerPage('statistik', async (el) => {
   ]);
 
   const users     = usersSnap.docs.map(d => ({id:d.id,...d.data()})).filter(u => u.aktiv !== false && u.vorname);
-  const anw       = anwSnap.docs.map(d => d.data()).filter(a => a.status==='kommt' || a.status==='bestaetigt' || a.status==='bereitschaft');
+  const anw       = anwSnap.docs.map(d => d.data()).filter(a => a.status==='kommt' || a.status==='bestaetigt');
   const einsaetze = einsaetzeSnap.docs.map(d => ({id:d.id,...d.data()}));
   const dienste   = diensteSnap.docs.map(d => ({id:d.id,...d.data()}));
 
@@ -2377,33 +1763,42 @@ registerPage('statistik', async (el) => {
   const dienstMap  = new Map(dienste.map(d  => [d.id, d]));
   const einsatzMap = new Map(einsaetze.map(e => [e.id, e]));
 
+  function stundenUndTyp(a) {
+    // typ+datum aus Quell-Collection ermitteln (anwesenheiten haben das evtl. nicht gesetzt)
+    const d = dienstMap.get(a.uebungId);
+    if (d) return { typ:'dienst',  datum: d.datum,  dauer_h: d.dauer_h||0 };
+    const e = einsatzMap.get(a.uebungId);
+    if (e) return { typ:'einsatz', datum: e.datum,  dauer_h: e.dauer_h||0 };
+    // Fallback auf gespeicherte Felder
+    return { typ: a.typ||'dienst', datum: a.datum, dauer_h: a.dauer_h||0 };
+  }
+  function stunden(userId, typ, jahr) {
+    return anw
+      .filter(a => a.userId===userId)
+      .reduce((s, a) => {
+        const {typ:t, datum:dat, dauer_h} = stundenUndTyp(a);
+        if (t !== typ) return s;
+        if (!jahrvon(dat, jahr)) return s;
+        return s + dauer_h;
+      }, 0);
+  }
+  function einsatzAnzahl(userId, jahr) {
+    return anw.filter(a => {
+      if (a.userId !== userId) return false;
+      const {typ, datum} = stundenUndTyp(a);
+      return typ==='einsatz' && jahrvon(datum, jahr);
+    }).length;
+  }
   function lehrgangStunden(userId, jahr) {
     return (qualiPerUser[userId]||[])
       .filter(q => q.datum && jahrvon(q.datum, jahr))
       .reduce((s, q) => s + (q.stunden || (q.tage || 1) * 8), 0);
   }
 
-  // Einheitliche Stunden-Berechnung: getStats() ist die einzige Quelle der Wahrheit
-  // (respektiert die relevant-Kennzeichnung; Einsatzstunden fließen hier bewusst NICHT ein,
-  // Dienststunden = nur relevante Dienste). Pro Nutzer/Jahr gecacht.
-  const anwByUser = new Map();
-  for (const a of anw) {
-    if (!anwByUser.has(a.userId)) anwByUser.set(a.userId, []);
-    anwByUser.get(a.userId).push(a);
-  }
-  const statsCache = new Map();
-  function statsFuer(userId, jahr) {
-    const key = userId + '|' + jahr;
-    if (!statsCache.has(key)) {
-      statsCache.set(key, getStats(anwByUser.get(userId) || [], dienstMap, einsatzMap, jahr));
-    }
-    return statsCache.get(key);
-  }
-
   // Jahresvergleich gesamt
   const gesamt = (jahr) => ({
     einsaetze: einsaetze.filter(e => jahrvon(e.datum, jahr)).length,
-    dienststunden: users.reduce((s,u) => s + statsFuer(u.id,jahr).dienstRelevant, 0),
+    dienststunden: users.reduce((s,u) => s + stunden(u.id,'dienst',jahr), 0),
     lehrgangsstunden: users.reduce((s,u) => s + lehrgangStunden(u.id,jahr), 0),
   });
   const gAkt = gesamt(jahrAkt);
@@ -2420,12 +1815,12 @@ registerPage('statistik', async (el) => {
   const kRows = users
     .sort((a,b) => (a.nachname||'').localeCompare(b.nachname||'', 'de') || (a.vorname||'').localeCompare(b.vorname||'', 'de'))
     .map(u => {
-      const dAkt = statsFuer(u.id,jahrAkt).dienstRelevant;
-      const dVor = statsFuer(u.id,jahrVor).dienstRelevant;
+      const dAkt = stunden(u.id,'dienst',jahrAkt);
+      const dVor = stunden(u.id,'dienst',jahrVor);
       const lAkt = lehrgangStunden(u.id,jahrAkt);
       const lVor = lehrgangStunden(u.id,jahrVor);
-      const eAkt = statsFuer(u.id,jahrAkt).einsaetze;
-      const eVor = statsFuer(u.id,jahrVor).einsaetze;
+      const eAkt = einsatzAnzahl(u.id,jahrAkt);
+      const eVor = einsatzAnzahl(u.id,jahrVor);
       return {u, dAkt, dVor, lAkt, lVor, eAkt, eVor};
     }); // nur aktive Kameraden, alphabetisch
 
@@ -2604,7 +1999,7 @@ function berechneEndDatum(startDatumStr, tage, lehrgang) {
 // ── Lehrgangsarten verwalten ──────────────────────────────
 // ── Admin: Dienstgrade & Dienst-Filter ───────────────────
 registerPage('einstellungen-admin', async (el) => {
-  if (!fw.hatRecht('stammdaten_dienstgrade')) { navigate('dashboard'); return; }
+  if (!fw.isWehrfuehrer()) { navigate('dashboard'); return; }
   fw.setTitle('Dienstgrade & Filter');
   fw.showBack(() => navigateBack());
 
@@ -2653,7 +2048,7 @@ registerPage('einstellungen-admin', async (el) => {
 });
 
 registerPage('lehrgangsarten-verwalten', async (el) => {
-  if (!fw.hatRecht('stammdaten_lehrgangsarten')) { navigate('dashboard'); return; }
+  if (!fw.isWehrfuehrer()) { navigate('dashboard'); return; }
   fw.setTitle('Lehrgangsarten');
   fw.showBack(() => navigateBack());
   fw.showHeaderAction('+ Neu', () => navigate('lehrgangsart-form', {}));
@@ -2707,8 +2102,7 @@ registerPage('lehrgangsarten-verwalten', async (el) => {
 });
 
 registerPage('lehrgangsart-form', async (el, {id}) => {
-  if (!fw.hatRecht('stammdaten_lehrgangsarten')) { navigate('dashboard'); return; }
-  await ladeLehrgangsarten();
+  if (!fw.isWehrfuehrer()) { navigate('dashboard'); return; }
   let art = null;
   if (id) {
     const snap = await fw.getDoc('lehrgangsarten/'+id);
@@ -2744,8 +2138,6 @@ registerPage('lehrgangsart-form', async (el, {id}) => {
   window.lehrgangsartSpeichern = async (artId) => {
     const bez = document.getElementById('la-bez').value.trim();
     if (!bez) { fw.toast('Bezeichnung erforderlich', true); return; }
-    const doppelt = _lehrgangsarten.some(a => a.id !== artId && a.bezeichnung.toLowerCase() === bez.toLowerCase());
-    if (doppelt) { fw.toast('Diese Bezeichnung gibt es bereits', true); return; }
     const data = {
       bezeichnung: bez,
       tage:        parseFloat(document.getElementById('la-tage').value)    || null,
@@ -2755,11 +2147,10 @@ registerPage('lehrgangsart-form', async (el, {id}) => {
     if (artId) {
       await fw.updateDoc('lehrgangsarten/'+artId, data);
     } else {
-      // Fortlaufende numerische ID vergeben, unabhängig von der Bezeichnung
-      const maxId = _lehrgangsarten.reduce((max, a) => Math.max(max, parseInt(a.id) || 0), 0);
-      const neueId = String(maxId + 1);
-      data.sortierung = _lehrgangsarten.length + 1;
-      await fw.setDoc('lehrgangsarten/'+neueId, data);
+      const snap = await fw.getDocs('lehrgangsarten');
+      data.sortierung = snap.size + 1;
+      const docId = bez.toLowerCase().replace(/[^a-z0-9]/g, '-');
+      await fw.setDoc('lehrgangsarten/'+docId, data);
     }
     _lehrgangsartenGeladen = false;
     await ladeLehrgangsarten();
@@ -2777,453 +2168,10 @@ registerPage('lehrgangsart-form', async (el, {id}) => {
   };
 });
 
-// ── Dienst-Arten verwalten ────────────────────────────────
-registerPage('dienstarten-verwalten', async (el) => {
-  if (!fw.hatRecht('stammdaten_dienstarten')) { navigate('dashboard'); return; }
-  fw.setTitle('Dienst-Arten');
-  fw.showBack(() => navigateBack());
-  fw.showHeaderAction('+ Neu', () => navigate('dienstart-form', {}));
-
-  _dienstartenGeladen = false;
-  const arten = await ladeDienstarten();
-
-  const renderListe = () => {
-    el.innerHTML = `
-      <div class="card" style="padding:0">
-        ${arten.length === 0 ? '<div class="empty" style="padding:1rem">Noch keine Dienst-Arten</div>' :
-          arten.map((a, i) => `
-            <div class="list-item">
-              <div class="list-item-body" onclick="navigate('dienstart-form',{id:'${a.id}'})" style="cursor:pointer">
-                <div class="list-item-title">${a.bezeichnung}</div>
-                <div class="list-item-sub">${a.relevant ? '<span style="color:#22c55e">Zählt zu den 40h</span>' : 'Zählt nicht zu den 40h'}</div>
-              </div>
-              <div style="display:flex;flex-direction:column;gap:0.2rem">
-                <button onclick="dienstartHoch('${a.id}')" ${i===0?'disabled':''} style="background:none;border:none;color:${i===0?'#ccc':'var(--text)'};cursor:pointer;padding:0.1rem 0.4rem;font-size:1rem">▲</button>
-                <button onclick="dienstartRunter('${a.id}')" ${i===arten.length-1?'disabled':''} style="background:none;border:none;color:${i===arten.length-1?'#ccc':'var(--text)'};cursor:pointer;padding:0.1rem 0.4rem;font-size:1rem">▼</button>
-              </div>
-            </div>`).join('')}
-      </div>
-      ${arten.length ? `
-      <div style="margin-top:0.8rem">
-        <button id="da-abgleich-btn" class="btn btn-secondary btn-sm btn-full" onclick="dienstartenAlleAbgleichen()">🔄 Bestehende Dienste mit 40h-Einstufung abgleichen</button>
-        <div class="muted" style="font-size:0.78rem;text-align:center;margin-top:0.3rem">Für alte Dienste, deren 40h-Zuordnung noch vom Stand vor einer Dienst-Art-Änderung stammt</div>
-      </div>` : ''}`;
-  };
-
-  renderListe();
-
-  // Einmaliger Komplett-Abgleich über ALLE Dienst-Arten hinweg: nötig für Dienste, deren
-  // relevant-Feld schon VOR dem Fix in dienstartSpeichern (der jetzt bei jedem Speichern
-  // abgleicht) veraltet ist – die werden sonst erst korrigiert, wenn jemand die jeweilige
-  // Dienst-Art manuell einmal erneut speichert.
-  window.dienstartenAlleAbgleichen = async () => {
-    if (!confirm('Alle bestehenden Dienste auf die aktuelle 40h-Einstufung ihrer Dienst-Art abgleichen?')) return;
-    const btn = document.getElementById('da-abgleich-btn');
-    if (btn) { btn.disabled = true; btn.textContent = '⏳ Wird abgeglichen...'; }
-    try {
-      const artMap = new Map(arten.map(a => [a.id, a.relevant !== false]));
-      const dSnap = await fw.getDocs('dienste');
-      const betroffen = dSnap.docs.filter(d => {
-        const data = d.data();
-        return data.art && artMap.has(data.art) && data.relevant !== artMap.get(data.art);
-      });
-      await Promise.all(betroffen.map(d => fw.updateDoc('dienste/'+d.id, { relevant: artMap.get(d.data().art) })));
-      fw.toast(betroffen.length ? `${betroffen.length} Dienste angepasst ✅` : 'War schon alles aktuell ✅');
-    } finally {
-      if (btn) { btn.disabled = false; btn.textContent = '🔄 Bestehende Dienste mit 40h-Einstufung abgleichen'; }
-    }
-  };
-
-  window.dienstartHoch = async (id) => {
-    const idx = arten.findIndex(a => a.id === id);
-    if (idx <= 0) return;
-    [arten[idx-1], arten[idx]] = [arten[idx], arten[idx-1]];
-    await speicherDienstartSortierung(arten);
-    renderListe();
-  };
-
-  window.dienstartRunter = async (id) => {
-    const idx = arten.findIndex(a => a.id === id);
-    if (idx >= arten.length-1) return;
-    [arten[idx], arten[idx+1]] = [arten[idx+1], arten[idx]];
-    await speicherDienstartSortierung(arten);
-    renderListe();
-  };
-
-  async function speicherDienstartSortierung(liste) {
-    await Promise.all(liste.map((a, i) =>
-      fw.updateDoc('dienstarten/'+a.id, { sortierung: i+1 })
-    ));
-    _dienstartenGeladen = false;
-    await ladeDienstarten();
-  }
-});
-
-registerPage('dienstart-form', async (el, {id}) => {
-  if (!fw.hatRecht('stammdaten_dienstarten')) { navigate('dashboard'); return; }
-  await ladeDienstarten();
-  let art = id ? _dienstarten.find(a => a.id === id) : null;
-  fw.setTitle(art ? 'Dienst-Art bearbeiten' : 'Neue Dienst-Art');
-  fw.showBack(() => navigateBack());
-
-  el.innerHTML = `
-    <div class="card">
-      <div class="form-row"><label>Bezeichnung</label>
-        <input id="da-bez" value="${art?.bezeichnung||''}" placeholder="z.B. Sportabend">
-      </div>
-      <div style="display:flex;align-items:center;gap:0.6rem;padding:0.4rem 0;border-top:1px solid var(--border);margin-top:0.2rem">
-        <input type="checkbox" id="da-relevant" style="width:1.2rem;height:1.2rem;accent-color:var(--red)" ${art?.relevant===false?'':'checked'}>
-        <label for="da-relevant" style="font-size:0.88rem;cursor:pointer">Zählt für 40-Stunden-Ziel</label>
-      </div>
-      <div class="btn-row">
-        <button class="btn btn-primary btn-full" onclick="dienstartSpeichern('${id||''}')">💾 Speichern</button>
-        ${art ? `<button class="btn btn-danger" onclick="dienstartLoeschen('${id}')">🗑 Löschen</button>` : ''}
-      </div>
-    </div>`;
-
-  window.dienstartSpeichern = async (artId) => {
-    const bez = document.getElementById('da-bez').value.trim();
-    if (!bez) { fw.toast('Bezeichnung erforderlich', true); return; }
-    const doppelt = _dienstarten.some(a => a.id !== artId && a.bezeichnung.toLowerCase() === bez.toLowerCase());
-    if (doppelt) { fw.toast('Diese Bezeichnung gibt es bereits', true); return; }
-    const relevant = document.getElementById('da-relevant').checked;
-    let toastText = 'Gespeichert ✅';
-    if (artId) {
-      await fw.updateDoc('dienstarten/'+artId, { bezeichnung: bez, relevant });
-      // Die 40h-Zugehörigkeit war bisher nur auf jedem einzelnen Dienst als Kopie gespeichert
-      // (relevant), die beim Anlegen aus der Dienst-Art übernommen wurde – eine spätere Änderung
-      // der Dienst-Art wirkte sich dadurch NICHT auf schon bestehende Dienste aus (gemeldeter Bug).
-      // WICHTIG: bewusst IMMER abgleichen, nicht nur wenn sich die Checkbox gerade jetzt ändert –
-      // Dienste, die VOR diesem Fix angelegt wurden, können schon jetzt vom aktuellen Stand der
-      // Dienst-Art abweichen, ohne dass beim Speichern eine Änderung erkannt würde (genau das war
-      // der gemeldete Fall bei "Fortbildung": Checkbox stand schon lange auf "nicht relevant",
-      // aber alte Dienste hatten noch relevant:true von vor der ersten Korrektur).
-      const dSnap = await fw.getDocs('dienste', fw.where('art','==',artId));
-      const betroffen = dSnap.docs.filter(d => d.data().relevant !== relevant);
-      await Promise.all(betroffen.map(d => fw.updateDoc('dienste/'+d.id, { relevant })));
-      if (betroffen.length) toastText = `Gespeichert ✅ (${betroffen.length} bestehende Dienste angepasst)`;
-    } else {
-      // Fortlaufende numerische ID vergeben, unabhängig von der Bezeichnung
-      const maxId = _dienstarten.reduce((max, a) => Math.max(max, parseInt(a.id) || 0), 0);
-      const neueId = String(maxId + 1);
-      await fw.setDoc('dienstarten/'+neueId, { bezeichnung: bez, relevant, sortierung: _dienstarten.length + 1 });
-    }
-    _dienstartenGeladen = false;
-    await ladeDienstarten();
-    fw.toast(toastText);
-    navigate('dienstarten-verwalten');
-  };
-
-  window.dienstartLoeschen = async (artId) => {
-    if (!confirm('Dienst-Art wirklich löschen? Bereits damit angelegte Dienste behalten die alte Zuordnung, zeigen sie aber nicht mehr an.')) return;
-    await fw.deleteDoc('dienstarten/'+artId);
-    _dienstartenGeladen = false;
-    await ladeDienstarten();
-    fw.toast('Gelöscht');
-    navigate('dienstarten-verwalten');
-  };
-});
-
-registerPage('raenge-verwalten', async (el) => {
-  if (!fw.hatRecht('stammdaten_raenge')) { navigate('dashboard'); return; }
-  fw.setTitle('Ränge');
-  fw.showBack(() => navigateBack());
-  fw.showHeaderAction('+ Neu', () => navigate('rang-form', {}));
-
-  _raengeGeladen = false;
-  const raenge = await ladeRaenge();
-  const standardId = await ladeStandardRang();
-
-  const anzahlRechte = (r) => Object.values(r.rechte || {}).filter(Boolean).length;
-
-  const renderListe = () => {
-    el.innerHTML = `
-      <div style="color:var(--muted);font-size:0.8rem;margin-bottom:0.6rem">
-        Der Standard-Rang wird bei neuen Kameraden automatisch vorausgewählt.
-      </div>
-      <div class="card" style="padding:0">
-        ${raenge.length === 0 ? '<div class="empty" style="padding:1rem">Noch keine Ränge</div>' :
-          raenge.map((r, i) => `
-            <div class="list-item">
-              <div class="list-item-body" onclick="navigate('rang-form',{id:'${r.id}'})" style="cursor:pointer">
-                <div class="list-item-title">${r.bezeichnung}${r.id === standardId ? ' <span style="color:#22c55e;font-size:0.75rem">★ Standard</span>' : ''}</div>
-                <div class="list-item-sub">${anzahlRechte(r)} von ${RECHTE_KATALOG.reduce((s,g)=>s+g.rechte.length,0)} Rechten</div>
-              </div>
-              <div style="display:flex;flex-direction:column;gap:0.2rem;align-items:center">
-                <button onclick="rangStandardSetzen('${r.id}')" title="Als Standard festlegen" style="background:none;border:none;color:${r.id===standardId?'#22c55e':'var(--text)'};cursor:pointer;padding:0.1rem 0.4rem;font-size:1rem">★</button>
-                <div style="display:flex;gap:0.1rem">
-                  <button onclick="rangHoch('${r.id}')" ${i===0?'disabled':''} style="background:none;border:none;color:${i===0?'#ccc':'var(--text)'};cursor:pointer;padding:0.1rem 0.3rem;font-size:0.9rem">▲</button>
-                  <button onclick="rangRunter('${r.id}')" ${i===raenge.length-1?'disabled':''} style="background:none;border:none;color:${i===raenge.length-1?'#ccc':'var(--text)'};cursor:pointer;padding:0.1rem 0.3rem;font-size:0.9rem">▼</button>
-                </div>
-              </div>
-            </div>`).join('')}
-      </div>`;
-  };
-
-  renderListe();
-
-  window.rangHoch = async (id) => {
-    const idx = raenge.findIndex(r => r.id === id);
-    if (idx <= 0) return;
-    [raenge[idx-1], raenge[idx]] = [raenge[idx], raenge[idx-1]];
-    await speicherRangSortierung(raenge);
-    renderListe();
-  };
-
-  window.rangRunter = async (id) => {
-    const idx = raenge.findIndex(r => r.id === id);
-    if (idx >= raenge.length-1) return;
-    [raenge[idx], raenge[idx+1]] = [raenge[idx+1], raenge[idx]];
-    await speicherRangSortierung(raenge);
-    renderListe();
-  };
-
-  window.rangStandardSetzen = async (id) => {
-    await fw.setDoc('einstellungen/raenge', { standardRangId: id });
-    _standardRangGeladen = false;
-    await ladeStandardRang();
-    fw.toast('Standard-Rang gesetzt ✅');
-    navigate('raenge-verwalten');
-  };
-
-  async function speicherRangSortierung(liste) {
-    await Promise.all(liste.map((r, i) =>
-      fw.updateDoc('raenge/'+r.id, { sortierung: i+1 })
-    ));
-    _raengeGeladen = false;
-    await ladeRaenge();
-  }
-});
-
-registerPage('rang-form', async (el, {id}) => {
-  if (!fw.hatRecht('stammdaten_raenge')) { navigate('dashboard'); return; }
-  await ladeRaenge();
-  let rang = id ? _raenge.find(r => r.id === id) : null;
-  fw.setTitle(rang ? 'Rang bearbeiten' : 'Neuer Rang');
-  fw.showBack(() => navigateBack());
-
-  el.innerHTML = `
-    <div class="card">
-      <div class="form-row"><label>Bezeichnung</label>
-        <input id="rg-bez" value="${rang?.bezeichnung||''}" placeholder="z.B. Ausbilder">
-      </div>
-    </div>
-    ${RECHTE_KATALOG.map((gruppe, gi) => `
-      <details class="card" style="padding:0" ${gi===0?'open':''}>
-        <summary class="section-header" style="margin:0;padding:0.6rem 1rem;cursor:pointer;list-style:none">${gruppe.bereich}</summary>
-        <div style="padding:0.2rem 1rem 0.8rem;display:flex;flex-direction:column;gap:0.5rem">
-          ${gruppe.rechte.map(r => `
-            <label style="display:flex;align-items:center;gap:0.6rem;cursor:pointer">
-              <input type="checkbox" class="rg-recht" value="${r.key}" style="width:1.2rem;height:1.2rem;accent-color:var(--red)" ${rang?.rechte?.[r.key]?'checked':''}>
-              <span style="font-size:0.88rem">${r.label}</span>
-            </label>`).join('')}
-        </div>
-      </details>`).join('')}
-    <div class="btn-row">
-      <button class="btn btn-primary btn-full" onclick="rangSpeichern('${id||''}')">💾 Speichern</button>
-      ${rang ? `<button class="btn btn-danger" onclick="rangLoeschen('${id}')">🗑 Löschen</button>` : ''}
-    </div>`;
-
-  window.rangSpeichern = async (rangId) => {
-    const bez = document.getElementById('rg-bez').value.trim();
-    if (!bez) { fw.toast('Bezeichnung erforderlich', true); return; }
-    const doppelt = _raenge.some(r => r.id !== rangId && r.bezeichnung.toLowerCase() === bez.toLowerCase());
-    if (doppelt) { fw.toast('Diese Bezeichnung gibt es bereits', true); return; }
-    const rechte = {};
-    document.querySelectorAll('.rg-recht:checked').forEach(cb => { rechte[cb.value] = true; });
-    if (rangId) {
-      await fw.updateDoc('raenge/'+rangId, { bezeichnung: bez, rechte });
-    } else {
-      // Fortlaufende numerische ID vergeben, unabhängig von der Bezeichnung
-      const maxId = _raenge.reduce((max, r) => Math.max(max, parseInt(r.id) || 0), 0);
-      const neueId = String(maxId + 1);
-      await fw.setDoc('raenge/'+neueId, { bezeichnung: bez, rechte, sortierung: _raenge.length + 1 });
-    }
-    _raengeGeladen = false;
-    await ladeRaenge();
-    fw.toast('Gespeichert ✅');
-    navigate('raenge-verwalten');
-  };
-
-  window.rangLoeschen = async (rangId) => {
-    const zugewieseneSnap = await fw.getDocs('users', fw.where('rangId', '==', rangId));
-    const hinweis = zugewieseneSnap.docs.length > 0
-      ? `\n\nAchtung: ${zugewieseneSnap.docs.length} Kamerad${zugewieseneSnap.docs.length!==1?'en sind':' ist'} aktuell dieser Rang zugewiesen und würde(n) dadurch alle darüber vergebenen Rechte verlieren.`
-      : '';
-    if (!confirm('Rang wirklich löschen?' + hinweis)) return;
-    await fw.deleteDoc('raenge/'+rangId);
-    _raengeGeladen = false;
-    await ladeRaenge();
-    fw.toast('Gelöscht');
-    navigate('raenge-verwalten');
-  };
-});
-
-// ── Dienste & Einsätze: tabellarisches Bearbeiten vergangener Einträge ────
-// "Backend"-Ansicht für Massen-Korrekturen (z. B. nachträgliches Vervollständigen vieler alter
-// Einträge in einem Rutsch), statt jeden einzeln über die normale Detail-/Formularseite zu öffnen.
-registerPage('uebungen-backend', async (el) => {
-  const darfDienste   = fw.hatRecht('dienste_bearbeiten');
-  const darfEinsaetze  = fw.hatRecht('einsaetze_bearbeiten');
-  if (!darfDienste && !darfEinsaetze) { navigate('dashboard'); return; }
-  fw.setTitle('Dienste & Einsätze');
-  fw.showBack(() => navigateBack());
-  await ladeDienstarten();
-  // MP-Feuer-Haken auch hier direkt umschaltbar machen (analog zum Knopf in der normalen
-  // Übersicht) – eigenes Recht, unabhängig von dienste_bearbeiten/einsaetze_bearbeiten.
-  const darfMpDienste   = fw.hatRecht('dienste_mp_pruefen');
-  const darfMpEinsaetze = fw.hatRecht('einsaetze_mp_pruefen');
-
-  const heute = new Date(); heute.setHours(0,0,0,0);
-  const toDate = d => d?.toDate ? d.toDate() : new Date(d);
-  const esc = s => (s||'').replace(/&/g,'&amp;').replace(/"/g,'&quot;');
-  const datumVal = d => { const x = toDate(d); return isNaN(x) ? '' : x.toISOString().slice(0,10); };
-  const inputStyle = 'background:var(--panel2);border:1px solid var(--border);border-radius:6px;padding:0.25rem 0.4rem;font-size:0.8rem;color:var(--text)';
-  const mpZelle = (typ, u, darf) => darf
-    ? `<td style="padding:0.3rem 0.3rem;text-align:center"><input type="checkbox" ${u.mpGeprueft?'checked':''} onchange="mpUmschalten('${typ}','${u.id}',this.checked)" title="In MP-Feuer überprüft"></td>`
-    : '';
-
-  const [dSnap, eSnap] = await Promise.all([
-    darfDienste  ? fw.getDocs('dienste')   : Promise.resolve({docs:[]}),
-    darfEinsaetze ? fw.getDocs('einsaetze') : Promise.resolve({docs:[]}),
-  ]);
-  const dienste = dSnap.docs.map(d => ({id:d.id,...d.data()}))
-    .filter(u => toDate(u.datum) < heute)
-    .sort((a,b) => toDate(b.datum) - toDate(a.datum));
-  const einsaetze = eSnap.docs.map(d => ({id:d.id,...d.data()}))
-    .filter(u => toDate(u.datum) < heute)
-    .sort((a,b) => toDate(b.datum) - toDate(a.datum));
-
-  const einsatzRows = einsaetze.map(u => {
-    const unv = einsatzUnvollstaendig(u);
-    return `<tr data-id="${u.id}" data-typ="einsatz" data-unv="${unv?1:0}" style="border-bottom:1px solid var(--border)">
-      <td class="bt-warn" style="padding:0.3rem 0.2rem;width:1.2rem">${unv?'⚠️':''}</td>
-      <td style="padding:0.3rem 0.3rem"><input class="bt-titel" value="${esc(u.titel)}" oninput="backendDirty(this)" style="width:150px;${inputStyle}"></td>
-      <td style="padding:0.3rem 0.3rem"><input type="date" class="bt-datum" value="${datumVal(u.datum)}" oninput="backendDirty(this)" style="${inputStyle}"></td>
-      <td style="padding:0.3rem 0.3rem"><input type="time" class="bt-beginn" value="${u.zeitBeginn||''}" oninput="backendDirty(this)" style="${inputStyle}"></td>
-      <td style="padding:0.3rem 0.3rem"><input type="time" class="bt-ende" value="${u.zeitEnde||''}" oninput="backendDirty(this)" style="${inputStyle}"></td>
-      <td style="padding:0.3rem 0.3rem"><input class="bt-ort" value="${esc(u.ort||'')}" oninput="backendDirty(this)" style="width:130px;${inputStyle}"></td>
-      ${mpZelle('einsatz', u, darfMpEinsaetze)}
-      <td style="padding:0.3rem 0.3rem"><button class="btn btn-sm btn-success bt-save" style="display:none" onclick="backendZeileSpeichern(this)">💾</button></td>
-    </tr>`;
-  }).join('');
-
-  const dienstRows = dienste.map(u => {
-    const unv = dienstUnvollstaendig(u);
-    return `<tr data-id="${u.id}" data-typ="dienst" data-unv="${unv?1:0}" style="border-bottom:1px solid var(--border)">
-      <td class="bt-warn" style="padding:0.3rem 0.2rem;width:1.2rem">${unv?'⚠️':''}</td>
-      <td style="padding:0.3rem 0.3rem"><input class="bt-titel" value="${esc(u.titel)}" oninput="backendDirty(this)" style="width:150px;${inputStyle}"></td>
-      <td style="padding:0.3rem 0.3rem"><input type="date" class="bt-datum" value="${datumVal(u.datum)}" oninput="backendDirty(this)" style="${inputStyle}"></td>
-      <td style="padding:0.3rem 0.3rem"><input type="number" step="0.25" min="0" class="bt-dauer" value="${u.dauer_h||''}" oninput="backendDirty(this)" style="width:60px;${inputStyle}"></td>
-      <td style="padding:0.3rem 0.3rem"><select class="bt-art" onchange="backendDirty(this)" style="${inputStyle}">
-        <option value="">–</option>
-        ${_dienstarten.map(a => `<option value="${a.id}" ${u.art===a.id?'selected':''}>${esc(a.bezeichnung)}</option>`).join('')}
-      </select></td>
-      ${mpZelle('dienst', u, darfMpDienste)}
-      <td style="padding:0.3rem 0.3rem"><button class="btn btn-sm btn-success bt-save" style="display:none" onclick="backendZeileSpeichern(this)">💾</button></td>
-    </tr>`;
-  }).join('');
-
-  const zeigeTabs = darfDienste && darfEinsaetze;
-  const startTyp = darfEinsaetze ? 'einsatz' : 'dienst';
-  const einsatzColspan = 7 + (darfMpEinsaetze ? 1 : 0);
-  const dienstColspan  = 6 + (darfMpDienste ? 1 : 0);
-
-  el.innerHTML = `
-    <div class="card" style="padding:0.6rem 0.8rem">
-      ${zeigeTabs ? `
-        <div style="display:flex;gap:0.4rem;margin-bottom:0.6rem">
-          <button class="btn btn-sm btn-primary" id="bt-tab-einsatz" onclick="backendTypWechseln('einsatz')">Einsätze (${einsaetze.length})</button>
-          <button class="btn btn-sm btn-secondary" id="bt-tab-dienst" onclick="backendTypWechseln('dienst')">Dienste (${dienste.length})</button>
-        </div>
-      ` : ''}
-      <label style="display:flex;align-items:center;gap:0.4rem;font-size:0.82rem;margin-bottom:0.6rem;cursor:pointer">
-        <input type="checkbox" id="bt-nur-unvollstaendig" onchange="backendFilter()">
-        Nur unvollständige zeigen
-      </label>
-      <div style="overflow-x:auto">
-        <table style="width:100%;border-collapse:collapse;font-size:0.8rem${startTyp!=='einsatz'?';display:none':''}" id="bt-table-einsatz">
-          <thead><tr style="text-align:left;border-bottom:2px solid var(--border)">
-            <th></th><th style="padding:0.3rem">Titel</th><th style="padding:0.3rem">Datum</th><th style="padding:0.3rem">Beginn</th><th style="padding:0.3rem">Ende</th><th style="padding:0.3rem">Ort</th>${darfMpEinsaetze?'<th style="padding:0.3rem">MP</th>':''}<th></th>
-          </tr></thead>
-          <tbody>${einsatzRows || `<tr><td colspan="${einsatzColspan}" style="padding:0.6rem;color:var(--muted)">Keine Einträge</td></tr>`}</tbody>
-        </table>
-        <table style="width:100%;border-collapse:collapse;font-size:0.8rem${startTyp!=='dienst'?';display:none':''}" id="bt-table-dienst">
-          <thead><tr style="text-align:left;border-bottom:2px solid var(--border)">
-            <th></th><th style="padding:0.3rem">Titel</th><th style="padding:0.3rem">Datum</th><th style="padding:0.3rem">Dauer (h)</th><th style="padding:0.3rem">Art</th>${darfMpDienste?'<th style="padding:0.3rem">MP</th>':''}<th></th>
-          </tr></thead>
-          <tbody>${dienstRows || `<tr><td colspan="${dienstColspan}" style="padding:0.6rem;color:var(--muted)">Keine Einträge</td></tr>`}</tbody>
-        </table>
-      </div>
-    </div>
-  `;
-});
-
-window.backendTypWechseln = (typ) => {
-  document.getElementById('bt-table-einsatz').style.display = typ === 'einsatz' ? '' : 'none';
-  document.getElementById('bt-table-dienst').style.display  = typ === 'dienst'  ? '' : 'none';
-  document.getElementById('bt-tab-einsatz')?.classList.toggle('btn-primary', typ === 'einsatz');
-  document.getElementById('bt-tab-einsatz')?.classList.toggle('btn-secondary', typ !== 'einsatz');
-  document.getElementById('bt-tab-dienst')?.classList.toggle('btn-primary', typ === 'dienst');
-  document.getElementById('bt-tab-dienst')?.classList.toggle('btn-secondary', typ !== 'dienst');
-};
-
-window.backendFilter = () => {
-  const nur = document.getElementById('bt-nur-unvollstaendig').checked;
-  document.querySelectorAll('tr[data-unv]').forEach(tr => {
-    tr.style.display = (!nur || tr.dataset.unv === '1') ? '' : 'none';
-  });
-};
-
-// Zeigt den Speichern-Button der Zeile an, sobald ein Feld geändert wurde.
-window.backendDirty = (input) => {
-  const tr = input.closest('tr');
-  const btn = tr?.querySelector('.bt-save');
-  if (btn) btn.style.display = 'inline-flex';
-};
-
-window.backendZeileSpeichern = async (btnEl) => {
-  const tr = btnEl.closest('tr');
-  const id = tr.dataset.id;
-  const typ = tr.dataset.typ;
-  const titel = tr.querySelector('.bt-titel').value.trim();
-  const datumStr = tr.querySelector('.bt-datum').value;
-  if (!titel || !datumStr) { fw.toast('Titel und Datum erforderlich', true); return; }
-  const data = { titel, datum: new Date(datumStr) };
-  let unv;
-  if (typ === 'einsatz') {
-    const zeitBeginn = tr.querySelector('.bt-beginn').value || null;
-    const zeitEnde   = tr.querySelector('.bt-ende').value || null;
-    const ort        = tr.querySelector('.bt-ort').value.trim() || null;
-    let dauer_h = 0;
-    if (zeitBeginn && zeitEnde) {
-      dauer_h = dauerAusZeiten(zeitBeginn, zeitEnde);
-    }
-    // Manuell gepflegte Endzeit ist keine automatische Bereitschafts-Endzeit mehr.
-    Object.assign(data, { zeitBeginn, zeitEnde, ort, dauer_h, zeitEndeAuto: false });
-    unv = einsatzUnvollstaendig({...data, typ: 'einsatz'});
-  } else {
-    const dauer_h = parseFloat(tr.querySelector('.bt-dauer').value) || 0;
-    const art = tr.querySelector('.bt-art').value || null;
-    if (!art) { fw.toast('Dienst-Art erforderlich', true); return; }
-    Object.assign(data, { dauer_h, art, relevant: dienstArtRelevant(art) });
-    unv = dienstUnvollstaendig({...data, typ: 'dienst'});
-  }
-  try {
-    await fw.updateDoc(col(typ)+'/'+id, data);
-    fw.toast('Gespeichert ✅');
-    btnEl.style.display = 'none';
-    tr.dataset.unv = unv ? '1' : '0';
-    const warnCell = tr.querySelector('.bt-warn');
-    if (warnCell) warnCell.textContent = unv ? '⚠️' : '';
-    if (document.getElementById('bt-nur-unvollstaendig')?.checked && !unv) tr.style.display = 'none';
-  } catch(e) { fw.toast(e.message, true); }
-};
-
 registerPage('lehrgaenge', async (el) => {
   await ladeLehrgangsarten();
   fw.setTitle('Lehrgänge');
-  if (fw.hatRecht('stammdaten_lehrgangsarten')) fw.showHeaderAction('⚙️ Verwalten', () => navigate('lehrgangsarten-verwalten'));
+  if (fw.isWehrfuehrer()) fw.showHeaderAction('⚙️ Verwalten', () => navigate('lehrgangsarten-verwalten'));
   fw.showBack(() => navigateBack());
 
   const jahrAkt = new Date().getFullYear();
@@ -3526,54 +2474,41 @@ registerPage('lehrgaenge', async (el) => {
 });
 
 // ── News erstellen ────────────────────────────────────────
-registerPage('news-form', async (el, {id} = {}) => {
-  if (!fw.hatRecht(id ? 'news_bearbeiten' : 'news_anlegen')) { navigate('dashboard'); return; }
-  let bestehend = null;
-  if (id) {
-    const snap = await fw.getDoc('news/'+id);
-    if (snap.exists()) bestehend = {id, ...snap.data()};
-  }
-  fw.setTitle(bestehend ? 'Beitrag bearbeiten' : 'Beitrag erstellen');
+registerPage('news-form', async (el) => {
+  fw.setTitle('Beitrag erstellen');
   fw.showBack(() => navigateBack());
-  let optionen = bestehend?.abstimmung?.optionen?.map(o => o.text) || ['', ''];
+  let optionen = ['', ''];
   let pdfFile = null;
-  let pdfEntfernen = false;
 
   // Ortswehren laden für Auswahl
   const owSnap = await fw.getDocs('ortswehren');
   const alleWehren = owSnap.docs.map(d => ({id:d.id,...d.data()}));
 
   const render = () => {
-    const abstCb = document.getElementById('nf-abstimmung-cb');
-    const abstOffen = abstCb ? abstCb.checked : !!bestehend?.abstimmung;
-    const pdfAnzeige = pdfFile ? '📎 '+pdfFile.name
-      : (bestehend?.pdf && !pdfEntfernen ? '📎 '+bestehend.pdf.name : 'Kein PDF ausgewählt');
     el.innerHTML = `
       <div class="card">
-        <div class="form-row"><label>Titel</label><input id="nf-titel" placeholder="Überschrift" value="${document.getElementById('nf-titel')?.value ?? bestehend?.titel ?? ''}"></div>
-        <div class="form-row"><label>Text</label><textarea id="nf-inhalt" rows="4" style="width:100%;padding:0.6rem;border:1px solid var(--border);border-radius:8px;font-size:0.9rem;resize:vertical">${document.getElementById('nf-inhalt')?.value ?? bestehend?.inhalt ?? ''}</textarea></div>
+        <div class="form-row"><label>Titel</label><input id="nf-titel" placeholder="Überschrift" value="${document.getElementById('nf-titel')?.value||''}"></div>
+        <div class="form-row"><label>Text</label><textarea id="nf-inhalt" rows="4" style="width:100%;padding:0.6rem;border:1px solid var(--border);border-radius:8px;font-size:0.9rem;resize:vertical">${document.getElementById('nf-inhalt')?.value||''}</textarea></div>
         <div class="form-row">
           <label>PDF anhängen (optional)</label>
           <input type="file" id="nf-pdf" accept="application/pdf" style="font-size:0.88rem">
-          <div id="nf-pdf-hint" style="font-size:0.75rem;color:var(--muted);margin-top:0.2rem">${pdfAnzeige}</div>
-          ${bestehend?.pdf && !pdfFile && !pdfEntfernen ? `<button type="button" class="btn btn-secondary btn-sm" style="margin-top:0.3rem" onclick="nfPdfEntfernen()">PDF entfernen</button>` : ''}
+          <div id="nf-pdf-hint" style="font-size:0.75rem;color:var(--muted);margin-top:0.2rem">${pdfFile?'📎 '+pdfFile.name:'Kein PDF ausgewählt'}</div>
         </div>
         <div style="display:flex;align-items:center;gap:0.5rem;margin:0.5rem 0">
-          <input type="checkbox" id="nf-abstimmung-cb" style="width:20px;height:20px" ${abstOffen?'checked':''}>
+          <input type="checkbox" id="nf-abstimmung-cb" style="width:20px;height:20px" ${document.getElementById('nf-abstimmung-cb')?.checked?'checked':''}>
           <label for="nf-abstimmung-cb" style="font-size:0.88rem">Abstimmung hinzufügen</label>
         </div>
-        <div id="nf-abstimmung-block" style="display:${abstOffen?'block':'none'}">
-          <div class="form-row"><label>Frage</label><input id="nf-frage" value="${document.getElementById('nf-frage')?.value ?? bestehend?.abstimmung?.frage ?? ''}"></div>
+        <div id="nf-abstimmung-block" style="display:${document.getElementById('nf-abstimmung-cb')?.checked?'block':'none'}">
+          <div class="form-row"><label>Frage</label><input id="nf-frage" value="${document.getElementById('nf-frage')?.value||''}"></div>
           ${optionen.map((o,i) => `<div class="form-row"><label>Option ${i+1}</label><input class="nf-opt" data-i="${i}" value="${o}"></div>`).join('')}
           <button class="btn btn-secondary btn-sm" onclick="nfAddOption()">+ Option</button>
-          ${bestehend?.abstimmung ? `<p class="muted" style="font-size:0.75rem;margin-top:0.3rem">Bereits abgegebene Stimmen bleiben erhalten, solange Reihenfolge und Anzahl der Optionen gleich bleiben.</p>` : ''}
         </div>
         <div class="form-row" id="nf-wehr-container">
           <label>Sichtbar für</label>
           <div id="nf-wehr-boxes" style="display:flex;flex-direction:column;gap:0.3rem;margin-top:0.2rem">⏳</div>
         </div>
         <div class="btn-row" style="margin-top:1rem">
-          <button class="btn btn-primary" onclick="newsSpeichern('${id||''}')" id="nf-save-btn">💾 ${bestehend?'Speichern':'Veröffentlichen'}</button>
+          <button class="btn btn-primary" onclick="newsSpeichern()" id="nf-save-btn">💾 Veröffentlichen</button>
         </div>
       </div>`;
     document.getElementById('nf-abstimmung-cb')?.addEventListener('change', e => {
@@ -3581,86 +2516,59 @@ registerPage('news-form', async (el, {id} = {}) => {
     });
     document.getElementById('nf-pdf')?.addEventListener('change', e => {
       pdfFile = e.target.files[0] || null;
-      pdfEntfernen = false;
       document.getElementById('nf-pdf-hint').textContent = pdfFile ? '📎 '+pdfFile.name : 'Kein PDF ausgewählt';
     });
     document.querySelectorAll('.nf-opt').forEach(inp => {
       inp.addEventListener('input', e => { optionen[+e.target.dataset.i] = e.target.value; });
     });
-    // Wehr-Checkboxen nach jedem Render neu befüllen
-    const wehrBox = document.getElementById('nf-wehr-boxes');
-    if (wehrBox) {
-      if (alleWehren.length <= 1) {
-        document.getElementById('nf-wehr-container')?.remove();
-      } else {
-        const gespeicherteIds = bestehend?.ortswehrIds || [];
-        wehrBox.innerHTML = alleWehren.map(w => {
-          const checked = bestehend ? gespeicherteIds.includes(w.id) : true;
-          return `<label style="display:flex;align-items:center;gap:0.5rem;font-size:0.88rem;cursor:pointer">
-            <input type="checkbox" class="nf-wehr-cb" value="${w.id}" ${checked?'checked':''} style="width:1rem;height:1rem;accent-color:var(--red)">
-            ${w.name}
-          </label>`;
-        }).join('');
-      }
-    }
   };
   render();
 
-  window.nfAddOption = () => { optionen.push(''); render(); };
-  window.nfPdfEntfernen = () => { pdfEntfernen = true; pdfFile = null; render(); };
+  // Wehr-Checkboxen befüllen
+  const wehrBox = document.getElementById('nf-wehr-boxes');
+  if (wehrBox) {
+    if (alleWehren.length <= 1) {
+      document.getElementById('nf-wehr-container')?.remove();
+    } else {
+      wehrBox.innerHTML = alleWehren.map(w => `
+        <label style="display:flex;align-items:center;gap:0.5rem;font-size:0.88rem;cursor:pointer">
+          <input type="checkbox" class="nf-wehr-cb" value="${w.id}" checked style="width:1rem;height:1rem;accent-color:var(--red)">
+          ${w.name}
+        </label>`).join('');
+    }
+  }
 
-  window.newsSpeichern = async (newsId) => {
+  window.nfAddOption = () => { optionen.push(''); render(); };
+  window.newsSpeichern = async () => {
     const titel  = document.getElementById('nf-titel').value.trim();
     const inhalt = document.getElementById('nf-inhalt').value.trim();
     if (!titel) { fw.toast('Titel fehlt', true); return; }
     const btn = document.getElementById('nf-save-btn');
-    const btnLabelFertig = newsId ? '💾 Speichern' : '💾 Veröffentlichen';
     btn.disabled = true; btn.textContent = '⏳ Wird gespeichert...';
     const hatAbst = document.getElementById('nf-abstimmung-cb')?.checked;
     const newsWehrIds = [...document.querySelectorAll('.nf-wehr-cb:checked')].map(cb => cb.value);
-    const data = { titel, inhalt, ortswehrIds: newsWehrIds };
-    if (!newsId) { data.erstelltAm = new Date(); data.erstelltVon = fw.user.uid; }
+    const data = { titel, inhalt, erstelltAm: new Date(), erstelltVon: fw.user.uid, ortswehrIds: newsWehrIds };
     if (hatAbst) {
       const frage = document.getElementById('nf-frage').value.trim();
       const opts  = optionen.filter(o => o.trim());
-      if (!frage || opts.length < 2) { fw.toast('Frage und mind. 2 Optionen erforderlich', true); btn.disabled=false; btn.textContent=btnLabelFertig; return; }
-      // Bereits abgegebene Stimmen anhand der Options-Reihenfolge erhalten
-      const alteOptionen = bestehend?.abstimmung?.optionen || [];
-      data.abstimmung = {
-        frage,
-        optionen: opts.map((text,i) => ({ text, stimmen: alteOptionen[i]?.stimmen || [] })),
-        ...(bestehend?.abstimmung?.aenderungen ? { aenderungen: bestehend.abstimmung.aenderungen } : {}),
-      };
-    } else if (newsId && bestehend?.abstimmung) {
-      data.abstimmung = null; // Abstimmung beim Bearbeiten entfernt
+      if (!frage || opts.length < 2) { fw.toast('Frage und mind. 2 Optionen erforderlich', true); btn.disabled=false; btn.textContent='💾 Veröffentlichen'; return; }
+      data.abstimmung = { frage, optionen: opts.map(text => ({text, stimmen:[]})) };
     }
-    // PDF hochladen / entfernen
+    // PDF hochladen
     if (pdfFile) {
       try {
         btn.textContent = '⏳ PDF wird hochgeladen...';
-        if (bestehend?.pdf?.pfad) { try { await fw.deletePdf(bestehend.pdf.pfad); } catch(e) {} }
         const pfad = `news-pdfs/${Date.now()}_${pdfFile.name.replace(/[^a-zA-Z0-9._-]/g,'_')}`;
         const url  = await fw.uploadPdf(pdfFile, pfad);
         data.pdf = { name: pdfFile.name, url, pfad };
       } catch(e) {
         fw.toast('PDF-Upload fehlgeschlagen: '+e.message, true);
-        btn.disabled=false; btn.textContent=btnLabelFertig; return;
+        btn.disabled=false; btn.textContent='💾 Veröffentlichen'; return;
       }
-    } else if (pdfEntfernen && bestehend?.pdf?.pfad) {
-      try { await fw.deletePdf(bestehend.pdf.pfad); } catch(e) {}
-      data.pdf = null;
     }
-
-    if (newsId) {
-      await fw.setDoc('news/'+newsId, data);
-      fw.toast('Gespeichert ✅');
-      navigate('dashboard');
-      return;
-    }
-
     await fw.addDoc('news', data);
 
-    // Push-Benachrichtigung direkt versenden (wie Alarm-Push) – nur bei neuen Beiträgen
+    // Push-Benachrichtigung direkt versenden (wie Alarm-Push)
     try {
       const usersSnap = await fw.getDocs('users');
       const tokens = usersSnap.docs
@@ -3686,9 +2594,8 @@ registerPage('news-form', async (el, {id} = {}) => {
 
 // ── Kameraden ─────────────────────────────────────────────
 registerPage('kameraden', async (el) => {
-  if (!fw.hatRecht('kameraden_ansehen')) { navigate('dashboard'); return; }
   fw.setTitle('Kameraden');
-  if (fw.hatRecht('kameraden_anlegen')) fw.showHeaderAction('+ Neu', () => navigate('kamerad-form', {}));
+  fw.showHeaderAction('+ Neu', () => navigate('kamerad-form', {}));
 
   const [snap, owSnapKam] = await Promise.all([
     fw.getDocs('users'),
@@ -3704,172 +2611,119 @@ registerPage('kameraden', async (el) => {
     });
   const aktiveUsers = users.filter(u => u.aktiv !== false);
 
-  // Anwesenheiten + Dienste/Einsätze laden, damit die Stunden wie überall sonst
-  // per getStats() berechnet werden (relevant-Flag beachten, Einsatzstunden nicht mit einrechnen)
-  const [anwSnap, kDiensteSnap, kEinsaetzeSnap] = await Promise.all([
-    fw.getDocs('anwesenheiten'),
-    fw.getDocs('dienste'),
-    fw.getDocs('einsaetze'),
-  ]);
-  const kDienstMap  = new Map(kDiensteSnap.docs.map(d => [d.id, d.data()]));
-  const kEinsatzMap = new Map(kEinsaetzeSnap.docs.map(d => [d.id, d.data()]));
-  const anwByUserKam = new Map();
+  // Anwesenheiten letzte 12 Monate laden
+  const vor12m = new Date(); vor12m.setFullYear(vor12m.getFullYear()-1);
+  const anwSnap = await fw.getDocs('anwesenheiten');
+  const stundenJahr = {};
   for (const d of anwSnap.docs) {
     const a = d.data();
-    if (!anwByUserKam.has(a.userId)) anwByUserKam.set(a.userId, []);
-    anwByUserKam.get(a.userId).push(a);
+    if (a.status !== 'kommt') continue;
+    const dat = a.datum?.toDate ? a.datum.toDate() : new Date(a.datum);
+    if (dat < vor12m) continue;
+    stundenJahr[a.userId] = (stundenJahr[a.userId] || 0) + (a.dauer_h || 0);
   }
 
   const ZIEL = 40;
   function stundenBadge(userId) {
-    const stats = getStats(anwByUserKam.get(userId) || [], kDienstMap, kEinsatzMap);
-    const h = stats.stunden12mZiel;
+    const h = Math.round((stundenJahr[userId] || 0) * 10) / 10;
     const pct = Math.min(100, Math.round(h / ZIEL * 100));
     const erreicht = h >= ZIEL;
     const farbe = erreicht ? '#22c55e' : h >= ZIEL * 0.75 ? '#f59e0b' : 'var(--muted)';
     return `<div style="text-align:right;min-width:64px">
-      <div style="font-size:0.8rem;font-weight:600;color:${farbe}">${h}h <span style="font-size:0.68rem;font-weight:500;color:var(--muted)">· ${stats.dienste12m}</span></div>
+      <div style="font-size:0.8rem;font-weight:600;color:${farbe}">${h}h</div>
       <div style="background:var(--border);border-radius:3px;height:4px;width:64px;margin-top:3px">
         <div style="background:${farbe};width:${pct}%;height:4px;border-radius:3px"></div>
       </div>
     </div>`;
   }
 
-  // Aufgaben für Kameraden mit passendem Recht berechnen (jede Teilliste einzeln über ein
-  // eigenes "Offene Aufgaben"-Recht gated, unabhängig von den sonstigen Verwaltungsrechten)
+  // Aufgaben für Wehrführer berechnen
   let aufgabenHtml = '';
-  const kannKameradenAufgaben  = fw.hatRecht('aufgaben_kameraden');
-  const kannDienstAufgaben     = fw.hatRecht('aufgaben_dienste');
-  const kannFahrzeugAufgaben   = fw.hatRecht('aufgaben_fahrzeuge');
-  const kannPwResetAufgaben    = fw.isWehrfuehrer(); // Passwort-Resets bleiben bewusst WF-exklusiv
-  // Bemerkungen sind separat rechtebeschränkt (dienste_bemerkungen/einsaetze_bemerkungen) –
-  // unabhängig vom "Unvollständig"-Aufgaben-Recht, dieselbe Berechtigung wie am Dienst/Einsatz selbst.
-  const kannDienstBemerkungen  = fw.hatRecht('dienste_bemerkungen');
-  const kannEinsatzBemerkungen = fw.hatRecht('einsaetze_bemerkungen');
-  if (kannKameradenAufgaben || kannDienstAufgaben || kannFahrzeugAufgaben || kannPwResetAufgaben
-      || kannDienstBemerkungen || kannEinsatzBemerkungen) {
+  if (fw.isWehrfuehrer()) {
+    // Alle Qualifikationen aktiver Kameraden laden
+    const qualiPromises = aktiveUsers.map(u =>
+      fw.getDocs('users/'+u.id+'/qualifikationen').then(s => ({
+        user: u,
+        qualis: s.docs.map(d => ({id:d.id,...d.data()}))
+      }))
+    );
+    const alleQualis = await Promise.all(qualiPromises);
+    const heute = new Date();
+    const j3 = new Date(); j3.setFullYear(heute.getFullYear()-3);
+    const j1 = new Date(); j1.setFullYear(heute.getFullYear()-1);
     const aufgaben = [];
 
-    if (kannKameradenAufgaben) {
-      // Alle Qualifikationen aktiver Kameraden laden
-      const qualiPromises = aktiveUsers.map(u =>
-        fw.getDocs('users/'+u.id+'/qualifikationen').then(s => ({
-          user: u,
-          qualis: s.docs.map(d => ({id:d.id,...d.data()}))
-        }))
-      );
-      const alleQualis = await Promise.all(qualiPromises);
-      const heute = new Date();
-      const j3 = new Date(); j3.setFullYear(heute.getFullYear()-3);
-      const j1 = new Date(); j1.setFullYear(heute.getFullYear()-1);
-
-      for (const {user, qualis} of alleQualis) {
-        const name = `${user.vorname||''} ${user.nachname||''}`.trim();
-        // Lehrgänge ohne Datum
-        for (const q of qualis) {
-          if (!q.datum) {
-            aufgaben.push({ typ: 'kein-datum', text: `${name}: „${q.bezeichnung}" hat kein Datum`, userId: user.id });
-          }
+    for (const {user, qualis} of alleQualis) {
+      const name = `${user.vorname||''} ${user.nachname||''}`.trim();
+      // Lehrgänge ohne Datum
+      for (const q of qualis) {
+        if (!q.datum) {
+          aufgaben.push({ typ: 'kein-datum', text: `${name}: „${q.bezeichnung}" hat kein Datum`, userId: user.id });
         }
-        // Fehlender Dienstgrad
-        if (!user.dienstgrad) {
-          aufgaben.push({ typ: 'dienstgrad', text: `${name}: Kein Dienstgrad eingetragen`, userId: user.id });
+      }
+      // Fehlender Dienstgrad
+      if (!user.dienstgrad) {
+        aufgaben.push({ typ: 'dienstgrad', text: `${name}: Kein Dienstgrad eingetragen`, userId: user.id });
+      }
+      // AGT: Gültigkeit prüfen
+      const hatAgt = qualis.some(q => (q.bezeichnung||'').trim().toLowerCase() === 'agt');
+      if (hatAgt) {
+        const unt  = user.agt_untersuchung ? new Date(user.agt_untersuchung) : null;
+        const waer = user.agt_waermeuebung ? new Date(user.agt_waermeuebung) : null;
+        const bel  = user.agt_belastung    ? new Date(user.agt_belastung)    : null;
+        const fehlt = [];
+        if (!unt  || unt  < j3) fehlt.push('G26 ' + (unt  ? `(${datum(unt)})` : 'fehlt'));
+        if (!waer || waer < j1) fehlt.push('Wärmeübung ' + (waer ? `(${datum(waer)})` : 'fehlt'));
+        if (!bel  || bel  < j1) fehlt.push('Belastung ' + (bel  ? `(${datum(bel)})` : 'fehlt'));
+        if (fehlt.length) {
+          aufgaben.push({ typ: 'agt', text: `${name} (AGT): ${fehlt.join(', ')}`, userId: user.id });
         }
-        // AGT: Gültigkeit prüfen
-        const hatAgt = qualis.some(q => (q.bezeichnung||'').trim().toLowerCase() === 'agt');
-        if (hatAgt) {
-          const unt  = user.agt_untersuchung ? new Date(user.agt_untersuchung) : null;
-          const waer = user.agt_waermeuebung ? new Date(user.agt_waermeuebung) : null;
-          const bel  = user.agt_belastung    ? new Date(user.agt_belastung)    : null;
-          const fehlt = [];
-          if (!unt  || unt  < j3) fehlt.push('G26 ' + (unt  ? `(${datum(unt)})` : 'fehlt'));
-          if (!waer || waer < j1) fehlt.push('Wärmeübung ' + (waer ? `(${datum(waer)})` : 'fehlt'));
-          if (!bel  || bel  < j1) fehlt.push('Belastung ' + (bel  ? `(${datum(bel)})` : 'fehlt'));
-          if (fehlt.length) {
-            aufgaben.push({ typ: 'agt', text: `${name} (AGT): ${fehlt.join(', ')}`, userId: user.id });
-          }
-        }
-        // Erste-Hilfe abgelaufen
-        const eh = qualis.find(q => (q.bezeichnung||'').trim().toLowerCase() === 'erste-hilfe');
-        if (eh?.datum) {
-          const ablauf = new Date(eh.datum?.toDate ? eh.datum.toDate() : eh.datum);
-          ablauf.setFullYear(ablauf.getFullYear() + 2);
-          if (ablauf < heute) {
-            aufgaben.push({ typ: 'eh', text: `${name}: Erste-Hilfe abgelaufen (${datum(ablauf)})`, userId: user.id });
-          }
+      }
+      // Erste-Hilfe abgelaufen
+      const eh = qualis.find(q => (q.bezeichnung||'').trim().toLowerCase() === 'erste-hilfe');
+      if (eh?.datum) {
+        const ablauf = new Date(eh.datum?.toDate ? eh.datum.toDate() : eh.datum);
+        ablauf.setFullYear(ablauf.getFullYear() + 2);
+        if (ablauf < heute) {
+          aufgaben.push({ typ: 'eh', text: `${name}: Erste-Hilfe abgelaufen (${datum(ablauf)})`, userId: user.id });
         }
       }
     }
 
-    if (kannDienstAufgaben || kannDienstBemerkungen || kannEinsatzBemerkungen) {
-      // Unvollständige Dienste/Einsätze sowie gefüllte Bemerkungen laden – ein Fetch für beide
-      // Zwecke, da nur pro Recht entschieden wird, was tatsächlich in die Liste aufgenommen wird.
-      const [dSnap, eSnap] = await Promise.all([
-        (kannDienstAufgaben || kannDienstBemerkungen)  ? fw.getDocs('dienste')  : Promise.resolve({docs:[]}),
-        (kannDienstAufgaben || kannEinsatzBemerkungen) ? fw.getDocs('einsaetze') : Promise.resolve({docs:[]}),
-      ]);
-      for (const d of dSnap.docs) {
-        const dienst = {id:d.id,...d.data()};
-        if (kannDienstAufgaben && dienstUnvollstaendig(dienst)) {
-          aufgaben.push({ typ: 'dienst-unvollstaendig', text: `Dienst „${dienst.titel}" unvollständig`, uebungId: dienst.id, uebungTyp: 'dienst' });
-        }
-        if (kannDienstBemerkungen && dienst.bemerkung) {
-          aufgaben.push({ typ: 'dienst-bemerkung', text: `Dienst „${dienst.titel}": ${dienst.bemerkung}`, uebungId: dienst.id, uebungTyp: 'dienst' });
-        }
-      }
-      for (const d of eSnap.docs) {
-        const einsatz = {id:d.id,...d.data()};
-        if (kannDienstAufgaben && einsatzUnvollstaendig(einsatz)) {
-          aufgaben.push({ typ: 'einsatz-unvollstaendig', text: `Einsatz „${einsatz.titel}" unvollständig`, uebungId: einsatz.id, uebungTyp: 'einsatz' });
-        }
-        if (kannEinsatzBemerkungen && einsatz.bemerkung) {
-          aufgaben.push({ typ: 'einsatz-bemerkung', text: `Einsatz „${einsatz.titel}": ${einsatz.bemerkung}`, uebungId: einsatz.id, uebungTyp: 'einsatz' });
-        }
-      }
+    // Passwort-Reset-Anfragen laden
+    const pwResetSnap = await fw.getDocs('pw_reset_requests', fw.where('erledigt','==',false));
+    for (const d of pwResetSnap.docs) {
+      const r = d.data();
+      aufgaben.push({ typ: 'pw-reset', text: `Passwort zurücksetzen: ${r.userName||r.loginName}`, resetId: d.id, userId: r.userId });
     }
 
-    if (kannPwResetAufgaben) {
-      // Passwort-Reset-Anfragen laden
-      const pwResetSnap = await fw.getDocs('pw_reset_requests', fw.where('erledigt','==',false));
-      for (const d of pwResetSnap.docs) {
-        const r = d.data();
-        aufgaben.push({ typ: 'pw-reset', text: `Passwort zurücksetzen: ${r.userName||r.loginName}`, resetId: d.id, userId: r.userId });
-      }
-    }
-
-    if (kannFahrzeugAufgaben) {
-      // Geräteprüfungen: nicht bestandene + kommentierte laden
-      const pruefSnap = await fw.getDocs('pruefaufgaben');
-      const pruefIssues = pruefSnap.docs
-        .map(d => ({id: d.id, ...d.data()}))
-        .filter(p => p.id !== 'allgemeine-notiz' && !p.ausgeblendet && (p.bestanden === false || p.kommentar));
-      for (const p of pruefIssues) {
-        if (p.bestanden === false) {
-          aufgaben.push({ typ: 'pruef-fail', text: `${p.bezeichnung}`, pruefId: p.id });
-        } else if (p.kommentar) {
-          aufgaben.push({ typ: 'pruef-kommentar', text: `Prüfung Kommentar: ${p.bezeichnung} – ${p.kommentar}`, pruefId: p.id });
-        }
+    // Geräteprüfungen: nicht bestandene + kommentierte laden
+    const pruefSnap = await fw.getDocs('pruefaufgaben');
+    const pruefIssues = pruefSnap.docs
+      .map(d => ({id: d.id, ...d.data()}))
+      .filter(p => p.id !== 'allgemeine-notiz' && !p.ausgeblendet && (p.bestanden === false || p.kommentar));
+    for (const p of pruefIssues) {
+      if (p.bestanden === false) {
+        aufgaben.push({ typ: 'pruef-fail', text: `${p.bezeichnung}`, pruefId: p.id });
+      } else if (p.kommentar) {
+        aufgaben.push({ typ: 'pruef-kommentar', text: `Prüfung Kommentar: ${p.bezeichnung} – ${p.kommentar}`, pruefId: p.id });
       }
     }
 
     // Ausgeblendete Aufgaben aus Firestore laden
-    const aufgabeKey = a => a.typ + (a.userId||'') + (a.pruefId||'') + (a.uebungId||'');
     const ausgeblendetSnap = await fw.getDoc('users/'+fw.user.uid+'/settings/aufgaben_ausgeblendet').catch(() => null);
     const ausgeblendet = new Set((ausgeblendetSnap?.data()?.ids) || []);
-    const ausgeblendetAufgaben = aufgaben.filter(a => ausgeblendet.has(aufgabeKey(a)));
-    const sichtbareAufgaben = aufgaben.filter(a => !ausgeblendet.has(aufgabeKey(a)));
+    const ausgeblendetAufgaben = aufgaben.filter(a => ausgeblendet.has(a.typ + (a.userId||'') + (a.pruefId||'')));
+    const sichtbareAufgaben = aufgaben.filter(a => !ausgeblendet.has(a.typ + (a.userId||'') + (a.pruefId||'')));
 
-    const icons = { 'kein-datum': '📅', 'agt': '🔴', 'eh': '⚠️', 'dienstgrad': '🪖', 'pruef-fail': '❌', 'pruef-kommentar': '💬', 'dienst-unvollstaendig': '📋', 'einsatz-unvollstaendig': '📋', 'dienst-bemerkung': '📝', 'einsatz-bemerkung': '📝' };
-    const uebungTypen = ['dienst-unvollstaendig', 'einsatz-unvollstaendig', 'dienst-bemerkung', 'einsatz-bemerkung'];
+    const icons = { 'kein-datum': '📅', 'agt': '🔴', 'eh': '⚠️', 'dienstgrad': '🪖', 'pruef-fail': '❌', 'pruef-kommentar': '💬' };
 
     const aufgabeZeile = (a, mitAusblenden) => {
-      const key = aufgabeKey(a);
+      const key = a.typ + (a.userId||'') + (a.pruefId||'');
       const ziel = a.typ === 'pw-reset'
         ? `pwResetDurchfuehren('${a.resetId}','${a.userId}')`
         : (a.typ === 'pruef-fail' || a.typ === 'pruef-kommentar')
         ? `navigiereZuFahrzeug('${a.fahrzeugId||''}')`
-        : uebungTypen.includes(a.typ)
-        ? `navigate('uebung-detail',{id:'${a.uebungId}',typ:'${a.uebungTyp}'})`
         : a.userId ? `navigate('kamerad-detail',{id:'${a.userId}'})`
         : `navigate('dienste')`;
       return `
@@ -3940,6 +2794,17 @@ registerPage('kameraden', async (el) => {
   }
 };
 
+window.navigiereZuFahrzeug = (fahrzeugId) => {
+  navigate('dienste');
+  // Nach dem Navigieren das richtige Accordion öffnen
+  if (fahrzeugId) {
+    setTimeout(() => {
+      const el = document.querySelector(`details[data-fz-id="${fahrzeugId}"]`);
+      if (el) { el.open = true; el.scrollIntoView({ behavior: 'smooth', block: 'start' }); }
+    }, 600);
+  }
+};
+
 window.aufgabeEinblenden = async (key) => {
       const snap = await fw.getDoc('users/'+fw.user.uid+'/settings/aufgaben_ausgeblendet').catch(() => null);
       const ids = new Set((snap?.data()?.ids) || []);
@@ -3965,7 +2830,7 @@ window.aufgabeEinblenden = async (key) => {
           <div class="list-chevron">›</div>
         </div>`).join('')}
     </div>
-    ${fw.hatRecht('stammdaten_ortswehren') ? `
+    ${fw.isWehrfuehrer() ? `
     <details style="background:var(--card);border-radius:10px;padding:0.8rem;margin-top:0.8rem">
       <summary style="font-weight:600;cursor:pointer;list-style:none;display:flex;align-items:center;gap:0.5rem">🏘️ Ortswehren verwalten</summary>
       <div id="ortswehr-inline" style="margin-top:0.8rem">⏳ Lade...</div>
@@ -3975,13 +2840,10 @@ window.aufgabeEinblenden = async (key) => {
         <button class="btn btn-secondary btn-sm btn-full" onclick="navigate('lehrgaenge')">Lehrgänge</button>
         <button class="btn btn-secondary btn-sm btn-full" onclick="navigate('statistik')">Statistiken</button>
       </div>
-      ${fw.hatRecht('stammdaten_dienstgrade') ? `<button class="btn btn-secondary btn-sm btn-full" onclick="navigate('einstellungen-admin')">Dienstgrade & Filter</button>` : ''}
-      ${fw.hatRecht('stammdaten_dienstarten') ? `<button class="btn btn-secondary btn-sm btn-full" onclick="navigate('dienstarten-verwalten')">Dienst-Arten</button>` : ''}
-      ${fw.hatRecht('stammdaten_raenge') ? `<button class="btn btn-secondary btn-sm btn-full" onclick="navigate('raenge-verwalten')">Ränge</button>` : ''}
-      ${(fw.hatRecht('dienste_bearbeiten') || fw.hatRecht('einsaetze_bearbeiten')) ? `<button class="btn btn-secondary btn-sm btn-full" onclick="navigate('uebungen-backend')">📋 Dienste & Einsätze bearbeiten</button>` : ''}
+      ${fw.isWehrfuehrer() ? `<button class="btn btn-secondary btn-sm btn-full" onclick="navigate('einstellungen-admin')">Dienstgrade & Filter</button>` : ''}
     </div>
   `;
-  if (fw.hatRecht('stammdaten_ortswehren')) ladeOrtswehrenInline();
+  if (fw.isWehrfuehrer()) ladeOrtswehrenInline();
 });
 
 async function ladeOrtswehrenInline() {
@@ -4105,30 +2967,20 @@ function renderAgtFelder(u, id, qualis) {
 
 registerPage('kamerad-detail', async (el, {id}) => {
   await ladeLehrgangsarten();
-  await ladeDienstarten();
-  await ladeRaenge();
   const snap = await fw.getDoc('users/'+id);
   if (!snap.exists()) { el.innerHTML='<div class="empty">Nicht gefunden</div>'; return; }
   const u = {id,...snap.data()};
   fw.setTitle(u.vorname+' '+u.nachname);
   fw.showBack(() => navigateBack());
-  if (fw.hatRecht('kameraden_stammdaten') || fw.hatRecht('kameraden_raenge_zuweisen')) {
-    fw.showHeaderAction('✏️ Edit', () => navigate('kamerad-form',{id}));
-  }
+  fw.showHeaderAction('✏️ Edit', () => navigate('kamerad-form',{id}));
 
-  const [aSnap, qSnap, ortSnap, planSnap, kDiensteSnap, kEinsaetzeSnap] = await Promise.all([
+  const [aSnap, qSnap, ortSnap, planSnap] = await Promise.all([
     fw.getDocs('anwesenheiten', fw.where('userId','==',id)),
     fw.getDocs('users/'+id+'/qualifikationen'),
     fw.getDocs('ortswehren'),
     fw.getDocs('lehrgangsplanung', fw.where('userId','==',id)),
-    fw.getDocs('dienste'),
-    fw.getDocs('einsaetze'),
   ]);
-  const kDienstMap  = new Map(kDiensteSnap.docs.map(d => [d.id, d.data()]));
-  const kEinsatzMap = new Map(kEinsaetzeSnap.docs.map(d => [d.id, d.data()]));
-  const stats    = getStats(aSnap.docs.map(d => d.data()), kDienstMap, kEinsatzMap);
-  const { diensteListe: kDiensteListe, einsaetzeListe: kEinsaetzeListe } =
-    meineEintraegeListen(aSnap.docs.map(d => d.data()), kDienstMap, kEinsatzMap);
+  const stats    = getStats(aSnap.docs.map(d => d.data()));
   const qualis   = qSnap.docs.map(d => ({id:d.id,...d.data()}));
   const planung  = planSnap.docs.map(d => ({id:d.id,...d.data()}));
   const owMap2 = new Map(ortSnap.docs.map(d => [d.id, d.data().name]));
@@ -4156,48 +3008,16 @@ registerPage('kamerad-detail', async (el, {id}) => {
     <div class="card" style="display:flex;align-items:center;gap:0.8rem;padding:0.9rem 1rem">
       <div style="font-size:1.4rem">${stats.ziel?'✅':'⚠️'}</div>
       <div>
-        <div style="font-weight:600;font-size:0.95rem">${stats.ziel?'Versicherungsschutz erreicht':'Versicherungsschutz nicht erreicht'}</div>
-        <div style="font-size:0.8rem;color:var(--muted);margin-top:0.1rem">${dauerFormat(stats.stunden12mZiel)}h / 40:00h (12 Mon.)</div>
+        <div style="font-weight:600;font-size:0.95rem">${stats.ziel?'40-Stunden-Ziel erreicht':'40-Stunden-Ziel nicht erreicht'}</div>
+        <div style="font-size:0.8rem;color:var(--muted);margin-top:0.1rem">${dauerFormat(stats.stunden12m)}h dieses Jahr · ${dauerFormat(stats.stunden12mZiel)}h / 40:00h (12 Mon.)</div>
       </div>
     </div>
     <div class="stats-grid">
-      <div class="stat-card"><div class="stat-zahl">${dauerFormat(stats.dienstRelevant)}h</div><div class="stat-count">${stats.dienstRelevantAnzahl} ${stats.dienstRelevantAnzahl===1?'Dienst':'Dienste'}</div><div class="stat-label">Dienste (relevant) ${new Date().getFullYear()}</div></div>
-      <div class="stat-card"><div class="stat-zahl">${dauerFormat(stats.dienstIrrelevant)}h</div><div class="stat-count">${stats.dienstIrrelevantAnzahl} ${stats.dienstIrrelevantAnzahl===1?'Dienst':'Dienste'}</div><div class="stat-label">Dienste (nicht relevant) ${new Date().getFullYear()}</div></div>
+      <div class="stat-card"><div class="stat-zahl">${dauerFormat(stats.dienstRelevant)}h</div><div class="stat-label">Dienste (relevant) ${new Date().getFullYear()}</div></div>
+      <div class="stat-card"><div class="stat-zahl">${dauerFormat(stats.dienstIrrelevant)}h</div><div class="stat-label">Dienste (nicht relevant) ${new Date().getFullYear()}</div></div>
       <div class="stat-card"><div class="stat-zahl">${dauerFormat(stats.gesamtEinsatz)}h</div><div class="stat-label">Einsatzstunden ${new Date().getFullYear()}</div></div>
       <div class="stat-card"><div class="stat-zahl">${stats.einsaetze}</div><div class="stat-label">${stats.einsaetze===1?'Einsatz':'Einsätze'} ${new Date().getFullYear()}</div></div>
     </div>
-    <details class="card" style="padding:0">
-      <summary class="section-header" style="margin:1.2rem 0 0;padding:0.6rem 1rem;cursor:pointer;list-style:none;display:flex;align-items:center;justify-content:space-between">
-        <span>Dienste (letzte 12 Monate)</span>
-        <span style="color:var(--muted);font-size:0.9rem">▾</span>
-      </summary>
-      <div style="padding:0 1rem 0.4rem">
-        ${kDiensteListe.length === 0 ? '<div class="empty" style="padding:0.6rem 0">Keine Dienste in den letzten 12 Monaten</div>' :
-          kDiensteListe.map(e => `
-            <div class="list-item" style="cursor:pointer" onclick="navigate('uebung-detail',{id:'${e.id}',typ:'dienst'})">
-              <div class="list-item-body">
-                <div class="list-item-title">${e.titel}</div>
-                <div class="list-item-sub">${datum(e.datum)}${e.art ? ' · '+dienstArtLabel(e.art) : ''}${e.relevant ? ' · <span style="color:#22c55e">40h</span>' : ''} · ${dauerFormat(e.dauer_h)}h</div>
-              </div>
-            </div>`).join('')}
-      </div>
-    </details>
-    <details class="card" style="padding:0">
-      <summary class="section-header" style="margin:1.2rem 0 0;padding:0.6rem 1rem;cursor:pointer;list-style:none;display:flex;align-items:center;justify-content:space-between">
-        <span>Einsätze ${new Date().getFullYear()}</span>
-        <span style="color:var(--muted);font-size:0.9rem">▾</span>
-      </summary>
-      <div style="padding:0 1rem 0.4rem">
-        ${kEinsaetzeListe.length === 0 ? `<div class="empty" style="padding:0.6rem 0">Keine Einsätze ${new Date().getFullYear()}</div>` :
-          kEinsaetzeListe.map(e => `
-            <div class="list-item" style="cursor:pointer" onclick="navigate('uebung-detail',{id:'${e.id}',typ:'einsatz'})">
-              <div class="list-item-body">
-                <div class="list-item-title">${e.titel}</div>
-                <div class="list-item-sub">${datum(e.datum)} · ${dauerFormat(e.dauer_h)}h</div>
-              </div>
-            </div>`).join('')}
-      </div>
-    </details>
     <div class="card">
       <div class="card-title">Stammdaten</div>
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:0.7rem">
@@ -4234,13 +3054,13 @@ registerPage('kamerad-detail', async (el, {id}) => {
 
 window.kameradAktiv = async (id) => {
   await fw.updateDoc('users/'+id, { aktiv: true });
-  fw.toast('Kamerad aktiv gesetzt ✅'); navigateReplace('kamerad-detail', {id});
+  fw.toast('Kamerad aktiv gesetzt ✅'); navigate('kamerad-detail', {id});
 };
 
 window.kameradInaktiv = async (id) => {
   if (!confirm('Kamerad auf inaktiv setzen?')) return;
   await fw.updateDoc('users/'+id, { aktiv: false });
-  fw.toast('Kamerad inaktiv gesetzt ✅'); navigateReplace('kamerad-detail', {id});
+  fw.toast('Kamerad inaktiv gesetzt ✅'); navigate('kamerad-detail', {id});
 };
 
 window.kameradLoeschen = async (id) => {
@@ -4278,11 +3098,15 @@ window.qualiHinzufuegen = async (userId) => {
     stunden: (tage && stundenProTag) ? Math.round(tage * stundenProTag * 100) / 100 : null,
     bemerkung: document.getElementById('q-bem').value || '',
   });
-  fw.toast('Hinzugefügt'); navigateReplace('kamerad-detail',{id:userId});
+  // Maschinist-Flag auf User setzen wenn Lehrgang "Maschinist" hinzugefügt
+  if (bez.toLowerCase().includes('maschinist')) {
+    await fw.updateDoc('users/'+userId, { istMaschinist: true });
+  }
+  fw.toast('Hinzugefügt'); navigate('kamerad-detail',{id:userId});
 };
 window.qualiLoeschen = async (userId, qualiId) => {
   await fw.deleteDoc('users/'+userId+'/qualifikationen/'+qualiId);
-  fw.toast('Gelöscht'); navigateReplace('kamerad-detail',{id:userId});
+  fw.toast('Gelöscht'); navigate('kamerad-detail',{id:userId});
 };
 
 window.agtSpeichern = async (userId) => {
@@ -4291,16 +3115,12 @@ window.agtSpeichern = async (userId) => {
     agt_waermeuebung: document.getElementById('agt-waer').value || null,
     agt_belastung:    document.getElementById('agt-bel').value || null,
   });
-  fw.toast('AGT-Daten gespeichert ✅'); navigateReplace('kamerad-detail',{id:userId});
+  fw.toast('AGT-Daten gespeichert ✅'); navigate('kamerad-detail',{id:userId});
 };
 
 registerPage('kamerad-form', async (el, {id}) => {
-  const erforderlichesRecht = id ? (fw.hatRecht('kameraden_stammdaten') || fw.hatRecht('kameraden_raenge_zuweisen')) : fw.hatRecht('kameraden_anlegen');
-  if (!erforderlichesRecht) { navigate('dashboard'); return; }
   await ladeLehrgangsarten();
   const dienstgradeLoaded = await ladeDienstgrade();
-  await ladeRaenge();
-  const standardRangId = await ladeStandardRang();
   let u = null;
   if (id) { const s=await fw.getDoc('users/'+id); if(s.exists()) u={id,...s.data()}; }
   fw.setTitle(u ? 'Bearbeiten' : 'Neuer Kamerad');
@@ -4331,21 +3151,22 @@ registerPage('kamerad-form', async (el, {id}) => {
           </label>`).join('')}
         </div>
       </div>
-      ${fw.isWehrfuehrer() ? `
       <div class="form-row"><label>Rolle</label>
-        <select id="k-rolle">
-          <option value="kamerad" ${u?.rolle!=='wehrfuehrer'?'selected':''}>Kamerad</option>
-          <option value="wehrfuehrer" ${u?.rolle==='wehrfuehrer'?'selected':''}>Administrator</option>
+        <select id="k-rolle" onchange="rolleGeaendert(this.value)">
+          <option value="kamerad" ${u?.rolle==='kamerad'?'selected':''}>Kamerad</option>
+          <option value="gruppenfuehrer" ${u?.rolle==='gruppenfuehrer'?'selected':''}>Gruppenführer</option>
+          <option value="zugfuehrer" ${u?.rolle==='zugfuehrer'?'selected':''}>Zugführer</option>
+          <option value="wehrfuehrer" ${u?.rolle==='wehrfuehrer'?'selected':''}>Wehrführer</option>
         </select>
-        <div class="muted" style="font-size:0.75rem;margin-top:0.3rem">Technisches Sicherheitsnetz mit Vollzugriff, unabhängig vom Rang. Die tatsächliche Funktion (z. B. Wehrführer, Gruppenführer, Zugführer) wird über Rang und Lehrgänge abgebildet.</div>
-      </div>` : ''}
-      ${fw.hatRecht('kameraden_raenge_zuweisen') ? `
-      <div class="form-row"><label>Rang</label>
-        <select id="k-rang">
-          <option value="">– kein Rang –</option>
-          ${_raenge.map(r => `<option value="${r.id}" ${(u ? u.rangId : standardRangId)===r.id?'selected':''}>${r.bezeichnung}</option>`).join('')}
-        </select>
-      </div>` : ''}
+        <div id="staerke-rolle-row" style="display:${u?.rolle==='wehrfuehrer'?'block':'none'};margin-top:0.5rem">
+          <label style="font-size:0.82rem;color:var(--muted)">Zählt in der Einsatzstärke als</label>
+          <select id="k-staerke-rolle">
+            <option value="kamerad" ${(u?.staerkeRolle||'kamerad')==='kamerad'?'selected':''}>Kamerad</option>
+            <option value="gruppenfuehrer" ${u?.staerkeRolle==='gruppenfuehrer'?'selected':''}>Gruppenführer</option>
+            <option value="zugfuehrer" ${u?.staerkeRolle==='zugfuehrer'?'selected':''}>Zugführer</option>
+          </select>
+        </div>
+      </div>
       <div class="form-row"><label>Führerscheinklassen</label><input id="k-fs" value="${u?.fuehrerschein||''}"></div>
       <div class="btn-row">
         <button class="btn btn-primary" onclick="kameradSpeichern('${id||''}')">💾 Speichern</button>
@@ -4386,22 +3207,12 @@ window.kameradSpeichern = async (id) => {
     eintrittsdatum: document.getElementById('k-ed').value || null,
     ortswehrIds: [...document.querySelectorAll('.k-ow-cb:checked')].map(cb => cb.value),
     ortswehrId: document.querySelector('.k-ow-cb:checked')?.value || null, // Kompatibilität
+    rolle: document.getElementById('k-rolle').value,
+    staerkeRolle: document.getElementById('k-rolle').value === 'wehrfuehrer'
+      ? (document.getElementById('k-staerke-rolle')?.value || 'kamerad')
+      : document.getElementById('k-rolle').value,
     fuehrerschein: document.getElementById('k-fs').value,
   };
-  // Rolle nur anfassen, wenn das Feld überhaupt angezeigt wurde (nur Wehrführer sehen/dürfen das ändern)
-  const rolleEl = document.getElementById('k-rolle');
-  if (rolleEl) {
-    data.rolle = rolleEl.value;
-  } else if (!id) {
-    data.rolle = 'kamerad'; // Neuanlage ohne Rolle-Feld (kein WF) -> sicherer Standard
-  }
-  // Rang nur anfassen, wenn das Feld angezeigt wurde (Recht 'Ränge zuweisen')
-  const rangEl = document.getElementById('k-rang');
-  if (rangEl) {
-    data.rangId = rangEl.value || null;
-  } else if (!id && _standardRangId) {
-    data.rangId = _standardRangId; // Neuanlage ohne Rang-Feld -> Standard-Rang setzen
-  }
   try {
     if (id) {
       await fw.setDoc('users/'+id, data);
@@ -4483,23 +3294,20 @@ async function ladePruefaufgabenInline() {
   const el = document.getElementById('pruef-inline');
   if (!el) return;
 
-  // Fahrzeuge und Prüfaufgaben sind jetzt getrennte Rechte-Bereiche
-  const kannFahrzeugeAnlegen    = fw.hatRecht('fahrzeuge_anlegen');
-  const kannFahrzeugeBearbeiten = fw.hatRecht('fahrzeuge_bearbeiten');
-  const kannFahrzeugeVerwalten  = kannFahrzeugeAnlegen || kannFahrzeugeBearbeiten || fw.hatRecht('fahrzeuge_loeschen');
-  const kannPruefaufgabenAnlegen    = fw.hatRecht('pruefaufgaben_anlegen');
-  const kannPruefaufgabenBearbeiten = fw.hatRecht('pruefaufgaben_bearbeiten');
-  const kannPruefaufgabenVerwalten  = kannPruefaufgabenAnlegen || kannPruefaufgabenBearbeiten || fw.hatRecht('pruefaufgaben_loeschen');
-  const kannPruefen = kannPruefaufgabenVerwalten || fw.hatRecht('pruefaufgaben_ergebnisse'); // Prüfergebnisse eintragen reicht
-  const siehtAlleFahrzeuge = kannFahrzeugeVerwalten || kannPruefaufgabenVerwalten;
+  const istWF = fw.isWehrfuehrer();
   const ortswehrId = fw.profil?.ortswehrIds?.[0] || fw.profil?.ortswehrId || null;
 
-  // Fahrzeuge laden – Verwalten-Rechte sehen alle, sonst nur eigene Ortswehr
+  // Fahrzeuge laden – WF sieht alle, Maschinist nur eigene Ortswehr
+  // Maschinist-Check
+  const myQualiSnap = await fw.getDocs('users/'+fw.user.uid+'/qualifikationen');
+  const myQualis = myQualiSnap.docs.map(d => d.data());
+  const istMaschinist = myQualis.some(q => (q.bezeichnung||'').toLowerCase().includes('maschinist'));
+
   const fahrzeugSnap = await fw.getDocs('fahrzeuge', fw.orderBy('name','asc'));
   const meineWehrIdsFz = fw.profil.ortswehrIds?.length ? fw.profil.ortswehrIds : (fw.profil.ortswehrId ? [fw.profil.ortswehrId] : []);
   const fahrzeuge = fahrzeugSnap.docs
     .map(d => ({id:d.id,...d.data()}))
-    .filter(f => siehtAlleFahrzeuge || !f.ortswehrId || meineWehrIdsFz.includes(f.ortswehrId));
+    .filter(f => istWF || !f.ortswehrId || meineWehrIdsFz.includes(f.ortswehrId));
 
   // Alle Prüfaufgaben laden
   const aufgabenSnap = await fw.getDocs('pruefaufgaben', fw.orderBy('bezeichnung','asc'));
@@ -4508,6 +3316,13 @@ async function ladePruefaufgabenInline() {
   const heute = new Date(); heute.setHours(0,0,0,0);
 
   function statusFarbe(a) {
+    // MHD prüfen (30 Tage Vorlauf)
+    if (a.mhd) {
+      const mhdDate = new Date(a.mhd);
+      const mhdWarnung = new Date(mhdDate); mhdWarnung.setDate(mhdWarnung.getDate() - 30);
+      if (heute > mhdDate) return '#dc2626';
+      if (heute >= mhdWarnung) return '#f59e0b';
+    }
     if (!a.letztesPruefDatum) return '#f59e0b';
     const letztes = a.letztesPruefDatum.toDate ? a.letztesPruefDatum.toDate() : new Date(a.letztesPruefDatum);
     if (!a.intervall) return '#94a3b8';
@@ -4556,19 +3371,18 @@ async function ladePruefaufgabenInline() {
           <div style="width:10px;height:10px;border-radius:50%;flex-shrink:0;margin-top:0.3rem;background:${statusFarbe(a)}"></div>
           <div style="flex:1;min-width:0">
             <div style="font-size:0.85rem;font-weight:600">${a.bezeichnung}</div>
-            <div style="font-size:0.73rem;color:var(--muted)">${datumsAnzeige(a)}${a.intervall ? ` · alle ${a.intervall} Mon.` : ''}</div>
+            <div style="font-size:0.73rem;color:var(--muted)">${datumsAnzeige(a)}${a.intervall ? ` · alle ${a.intervall} Mon.` : ''}${a.mhd ? ` · MHD: ${(([y,m,d]) => d+'.'+m+'.'+y)(a.mhd.split('-'))}` : ''}</div>
             ${a.kommentar ? `<div style="font-size:0.73rem;color:var(--muted);margin-top:0.15rem">💬 ${a.kommentar}</div>` : ''}
           </div>
           <div style="display:flex;flex-direction:column;gap:0.2rem;flex-shrink:0;align-items:flex-end">
-            ${kannPruefen ? `
             <div style="display:flex;gap:0.2rem">
               <button class="btn btn-sm btn-success" style="font-size:0.7rem;padding:0.15rem 0.35rem" onclick="pruefBestanden('${a.id}',true)" title="Bestanden">✅</button>
               <button class="btn btn-sm btn-danger" style="font-size:0.7rem;padding:0.15rem 0.35rem" onclick="pruefBestanden('${a.id}',false)" title="Nicht bestanden">❌</button>
             </div>
             <div style="display:flex;gap:0.2rem">
               <button class="btn btn-sm btn-secondary" style="font-size:0.7rem;padding:0.15rem 0.35rem" onclick="pruefKommentar('${a.id}')" title="Kommentar">💬</button>
-              ${kannPruefaufgabenBearbeiten ? `<button class="btn btn-sm btn-secondary" style="font-size:0.7rem;padding:0.15rem 0.35rem" onclick="navigate('pruefaufgabe-form',{id:'${a.id}'})">✏️</button>` : ''}
-            </div>` : ''}
+              ${istWF ? `<button class="btn btn-sm btn-secondary" style="font-size:0.7rem;padding:0.15rem 0.35rem" onclick="navigate('pruefaufgabe-form',{id:'${a.id}'})">✏️</button>` : ''}
+            </div>
           </div>
         </div>
       </div>`).join('');
@@ -4576,16 +3390,16 @@ async function ladePruefaufgabenInline() {
 
   if (fahrzeuge.length === 0) {
     el.innerHTML = `<p class="muted" style="font-size:0.85rem">Noch keine Fahrzeuge</p>
-      ${kannFahrzeugeAnlegen ? `<button class="btn btn-secondary btn-sm" style="margin-top:0.5rem" onclick="navigate('fahrzeug-form',{})">+ Fahrzeug hinzufügen</button>` : ''}`;
+      ${istWF ? `<button class="btn btn-secondary btn-sm" style="margin-top:0.5rem" onclick="navigate('fahrzeug-form',{})">+ Fahrzeug hinzufügen</button>` : ''}`;
     return;
   }
 
   // Dashboard-Hinweis: nicht bestandene oder kommentierte Aufgaben
   const offene = alleAufgaben.filter(a => !a.ausgeblendet && (a.bestanden === false || a.kommentar));
-  const dashHtml = kannPruefen && offene.length ? `
+  const dashHtml = (istWF || istMaschinist) && offene.length ? `
     <div class="card" style="border-left:3px solid #ef4444;margin-bottom:0.5rem">
       <div style="font-weight:600;font-size:0.88rem;color:#ef4444;margin-bottom:0.4rem">⚠️ ${offene.length} Aufgabe${offene.length!==1?'n':''} mit Handlungsbedarf</div>
-      ${offene.map(a => `<div style="font-size:0.82rem;padding:0.3rem 0;border-bottom:1px solid var(--border);cursor:pointer" onclick="navigiereZuFahrzeug('${a.fahrzeugId||''}')"><div style="display:flex;align-items:center;gap:0.4rem"><span style="flex:1;font-weight:600">${a.bezeichnung}</span><button onclick="event.stopPropagation();pruefKommentar('${a.id}')" style="background:none;border:none;color:#9ca3af;cursor:pointer;font-size:0.8rem;padding:0;flex-shrink:0">💬</button></div>${a.kommentar?`<div style="font-size:0.75rem;color:var(--muted);margin-top:0.1rem">${a.kommentar}</div>`:''}</div>`).join('')}
+      ${offene.map(a => `<div style="font-size:0.82rem;padding:0.3rem 0;border-bottom:1px solid var(--border)"><div style="display:flex;align-items:center;gap:0.4rem"><span style="flex:1;font-weight:600">${a.bezeichnung}</span><button onclick="pruefKommentar('${a.id}')" style="background:none;border:none;color:#9ca3af;cursor:pointer;font-size:0.8rem;padding:0;flex-shrink:0">💬</button></div>${a.kommentar?`<div style="font-size:0.75rem;color:var(--muted);margin-top:0.1rem">${a.kommentar}</div>`:''}</div>`).join('')}
     </div>` : '';
 
   // Freitext-Notiz laden
@@ -4606,8 +3420,8 @@ async function ladePruefaufgabenInline() {
       <summary style="padding:0.4rem 0.8rem;cursor:pointer;list-style:none;display:flex;align-items:center;justify-content:space-between;font-weight:600;font-size:13px;border-radius:8px">
         <span>${f.name}${f.bezeichnung ? ` <span style="font-weight:400;color:var(--muted);font-size:0.8rem">(${f.bezeichnung})</span>` : ''}</span>
         <div style="display:flex;gap:0.4rem;align-items:center">
-          ${kannFahrzeugeBearbeiten ? `<button class="btn btn-sm btn-secondary" style="font-size:0.65rem;padding:0.15rem 0.4rem" onclick="event.stopPropagation();navigate('fahrzeug-form',{id:'${f.id}'})">✏️</button>` : ''}
-          ${kannPruefaufgabenAnlegen ? `<button class="btn btn-sm btn-secondary" style="font-size:0.65rem;padding:0.15rem 0.4rem" onclick="event.stopPropagation();navigate('pruefaufgabe-form',{fahrzeugId:'${f.id}'})">+</button>` : ''}
+          ${istWF ? `<button class="btn btn-sm btn-secondary" style="font-size:0.65rem;padding:0.15rem 0.4rem" onclick="event.stopPropagation();navigate('fahrzeug-form',{id:'${f.id}'})">✏️</button>
+          <button class="btn btn-sm btn-secondary" style="font-size:0.65rem;padding:0.15rem 0.4rem" onclick="event.stopPropagation();navigate('pruefaufgabe-form',{fahrzeugId:'${f.id}'})">+</button>` : ''}
           <span style="color:var(--muted)">▾</span>
         </div>
       </summary>
@@ -4619,7 +3433,7 @@ async function ladePruefaufgabenInline() {
         </div>
       </div>
     </details>`).join('') +
-    (kannFahrzeugeAnlegen ? `<button class="btn btn-secondary btn-sm" style="margin-top:0.5rem" onclick="navigate('fahrzeug-form',{})">+ Fahrzeug hinzufügen</button>` : '');
+    (istWF ? `<button class="btn btn-secondary btn-sm" style="margin-top:0.5rem" onclick="navigate('fahrzeug-form',{})">+ Fahrzeug hinzufügen</button>` : '');
 
   window.fahrzeugNotizSpeichern = async (fzId) => {
     const text = document.getElementById('notiz-'+fzId)?.value || '';
@@ -4664,7 +3478,7 @@ window.pruefAusblenden = async (id) => {
 
 // ── Fahrzeug Form ─────────────────────────────────────────
 registerPage('fahrzeug-form', async (el, {id}) => {
-  if (!fw.hatRecht(id ? 'fahrzeuge_bearbeiten' : 'fahrzeuge_anlegen')) { el.innerHTML = '<div class="empty">Keine Berechtigung</div>'; return; }
+  if (!fw.isWehrfuehrer()) { el.innerHTML = '<div class="empty">Keine Berechtigung</div>'; return; }
   fw.setTitle(id ? 'Fahrzeug bearbeiten' : 'Neues Fahrzeug');
   fw.showBack(() => navigateBack());
 
@@ -4697,7 +3511,7 @@ registerPage('fahrzeug-form', async (el, {id}) => {
       </div>
       <div class="btn-row" style="margin-top:0.5rem">
         <button class="btn btn-primary" onclick="fahrzeugSpeichern('${id||''}')">💾 Speichern</button>
-        ${id && fw.hatRecht('fahrzeuge_loeschen') ? `<button class="btn btn-danger" onclick="fahrzeugLoeschen('${id}')">🗑 Löschen</button>` : ''}
+        ${id ? `<button class="btn btn-danger" onclick="fahrzeugLoeschen('${id}')">🗑 Löschen</button>` : ''}
       </div>
     </div>
   `;
@@ -4724,7 +3538,7 @@ window.fahrzeugLoeschen = async (id) => {
 
 // ── Prüfaufgabe Form ──────────────────────────────────────
 registerPage('pruefaufgabe-form', async (el, {id, fahrzeugId: vorFahrzeugId}) => {
-  if (!fw.hatRecht(id ? 'pruefaufgaben_bearbeiten' : 'pruefaufgaben_anlegen')) { el.innerHTML = '<div class="empty">Keine Berechtigung</div>'; return; }
+  if (!fw.isWehrfuehrer()) { el.innerHTML = '<div class="empty">Keine Berechtigung</div>'; return; }
   fw.setTitle(id ? 'Aufgabe bearbeiten' : 'Neue Aufgabe');
   fw.showBack(() => navigateBack());
 
@@ -4757,7 +3571,7 @@ registerPage('pruefaufgabe-form', async (el, {id, fahrzeugId: vorFahrzeugId}) =>
       ${aufgabe?.ausgeblendet ? `<div style="margin-bottom:0.5rem"><button class="btn btn-secondary btn-full" onclick="pruefEinblenden('${id}')">👁 Wieder einblenden</button></div>` : ''}
       <div class="btn-row" style="margin-top:0.5rem">
         <button class="btn btn-primary" onclick="pruefaufgabeSpeichern('${id||''}')">💾 Speichern</button>
-        ${id && fw.hatRecht('pruefaufgaben_loeschen') ? `<button class="btn btn-danger" onclick="pruefaufgabeLoeschen('${id}')">🗑 Löschen</button>` : ''}
+        ${id ? `<button class="btn btn-danger" onclick="pruefaufgabeLoeschen('${id}')">🗑 Löschen</button>` : ''}
       </div>
     </div>
   `;
@@ -4776,7 +3590,137 @@ window.pruefaufgabeSpeichern = async (id) => {
   const datStr = document.getElementById('pa-dat').value;
   if (!bez) { fw.toast('Bezeichnung fehlt', true); return; }
   if (!fzId) { fw.toast('Fahrzeug fehlt', true); return; }
-  const data = { bezeichnung: bez, intervall: int, fahrzeugId: fzId, letztesPruefDatum: datStr ? new Date(datStr) : null };
+  const mhd = document.getElementById('pa-mhd')?.value || null;
+  const data = { bezeichnung: bez, intervall: int, fahrzeugId: fzId, letztesPruefDatum: datStr ? new Date(datStr) : null, mhd: mhd || null };
+  if (id) { await fw.setDoc('pruefaufgaben/'+id, data); }
+  else    { await fw.addDoc('pruefaufgaben', data); }
+  fw.toast('Gespeichert ✅');
+  navigate('dienste');
+};
+
+window.pruefaufgabeLoeschen = async (id) => {
+  if (!confirm('Aufgabe wirklich löschen?')) return;
+  await fw.deleteDoc('pruefaufgaben/'+id);
+  fw.toast('Gelöscht');
+  navigate('dienste');
+};
+
+// ── Fahrzeug Form ─────────────────────────────────────────
+registerPage('fahrzeug-form', async (el, {id}) => {
+  if (!fw.isWehrfuehrer()) { el.innerHTML = '<div class="empty">Keine Berechtigung</div>'; return; }
+  fw.setTitle(id ? 'Fahrzeug bearbeiten' : 'Neues Fahrzeug');
+  fw.showBack(() => navigateBack());
+
+  let fahrzeug = null;
+  if (id) {
+    const snap = await fw.getDoc('fahrzeuge/'+id);
+    if (snap.exists()) fahrzeug = {id, ...snap.data()};
+  }
+
+  // Ortswehren für Dropdown laden
+  const wehrSnap = await fw.getDocs('ortswehren', fw.orderBy('name','asc'));
+  const wehren = wehrSnap.docs.map(d => ({id:d.id,...d.data()}));
+
+  el.innerHTML = `
+    <div class="card">
+      <div class="form-row">
+        <label>Fahrzeugkennung (z.B. 1/48/6)</label>
+        <input id="fz-name" value="${fahrzeug?.name||''}">
+      </div>
+      <div class="form-row">
+        <label>Bezeichnung (z.B. ZF-16)</label>
+        <input id="fz-bez" value="${fahrzeug?.bezeichnung||''}">
+      </div>
+      <div class="form-row">
+        <label>Ortswehr</label>
+        <select id="fz-wehr">
+          <option value="">– Bitte wählen –</option>
+          ${wehren.map(w => `<option value="${w.id}" ${fahrzeug?.ortswehrId===w.id?'selected':''}>${w.name}</option>`).join('')}
+        </select>
+      </div>
+      <div class="btn-row" style="margin-top:0.5rem">
+        <button class="btn btn-primary" onclick="fahrzeugSpeichern('${id||''}')">💾 Speichern</button>
+        ${id ? `<button class="btn btn-danger" onclick="fahrzeugLoeschen('${id}')">🗑 Löschen</button>` : ''}
+      </div>
+    </div>
+  `;
+});
+
+window.fahrzeugSpeichern = async (id) => {
+  const name = document.getElementById('fz-name').value.trim();
+  const bez  = document.getElementById('fz-bez').value.trim();
+  const wehr = document.getElementById('fz-wehr').value;
+  if (!name) { fw.toast('Fahrzeugkennung fehlt', true); return; }
+  const data = { name, bezeichnung: bez, ortswehrId: wehr || null };
+  if (id) { await fw.setDoc('fahrzeuge/'+id, data); }
+  else    { await fw.addDoc('fahrzeuge', data); }
+  fw.toast('Gespeichert ✅');
+  navigate('dienste');
+};
+
+window.fahrzeugLoeschen = async (id) => {
+  if (!confirm('Fahrzeug wirklich löschen? Zugehörige Aufgaben bleiben erhalten.')) return;
+  await fw.deleteDoc('fahrzeuge/'+id);
+  fw.toast('Gelöscht');
+  navigate('dienste');
+};
+
+// ── Prüfaufgabe Form ──────────────────────────────────────
+registerPage('pruefaufgabe-form', async (el, {id, fahrzeugId: vorFahrzeugId}) => {
+  if (!fw.isWehrfuehrer()) { el.innerHTML = '<div class="empty">Keine Berechtigung</div>'; return; }
+  fw.setTitle(id ? 'Aufgabe bearbeiten' : 'Neue Aufgabe');
+  fw.showBack(() => navigateBack());
+
+  let aufgabe = null;
+  if (id) {
+    const snap = await fw.getDoc('pruefaufgaben/'+id);
+    if (snap.exists()) aufgabe = {id, ...snap.data()};
+  }
+
+  const letztesDatum = aufgabe?.letztesPruefDatum
+    ? (aufgabe.letztesPruefDatum.toDate ? aufgabe.letztesPruefDatum.toDate() : new Date(aufgabe.letztesPruefDatum)).toISOString().split('T')[0]
+    : '';
+
+  const fzSnap = await fw.getDocs('fahrzeuge', fw.orderBy('name','asc'));
+  const fahrzeuge = fzSnap.docs.map(d => ({id:d.id,...d.data()}));
+  const aktivFahrzeugId = aufgabe?.fahrzeugId || vorFahrzeugId || '';
+
+  el.innerHTML = `
+    <div class="card">
+      <div class="form-row">
+        <label>Fahrzeug</label>
+        <select id="pa-fz">
+          <option value="">– Bitte wählen –</option>
+          ${fahrzeuge.map(f => `<option value="${f.id}" ${aktivFahrzeugId===f.id?'selected':''}>${f.name}${f.bezeichnung?' ('+f.bezeichnung+')':''}</option>`).join('')}
+        </select>
+      </div>
+      <div class="form-row"><label>Bezeichnung</label><input id="pa-bez" value="${aufgabe?.bezeichnung||''}"></div>
+      <div class="form-row"><label>Intervall (Monate)</label><input id="pa-int" type="number" min="1" value="${aufgabe?.intervall||''}"></div>
+      <div class="form-row"><label>Letztes Prüfdatum</label><input id="pa-dat" type="date" value="${letztesDatum}"></div>
+      ${aufgabe?.ausgeblendet ? `<div style="margin-bottom:0.5rem"><button class="btn btn-secondary btn-full" onclick="pruefEinblenden('${id}')">👁 Wieder einblenden</button></div>` : ''}
+      <div class="btn-row" style="margin-top:0.5rem">
+        <button class="btn btn-primary" onclick="pruefaufgabeSpeichern('${id||''}')">💾 Speichern</button>
+        ${id ? `<button class="btn btn-danger" onclick="pruefaufgabeLoeschen('${id}')">🗑 Löschen</button>` : ''}
+      </div>
+    </div>
+  `;
+});
+
+window.pruefEinblenden = async (id) => {
+  await fw.setDoc('pruefaufgaben/'+id, { ausgeblendet: false });
+  fw.toast('Wieder eingeblendet ✅');
+  navigateBack();
+};
+
+window.pruefaufgabeSpeichern = async (id) => {
+  const fzId = document.getElementById('pa-fz').value;
+  const bez  = document.getElementById('pa-bez').value.trim();
+  const int  = parseInt(document.getElementById('pa-int').value) || null;
+  const datStr = document.getElementById('pa-dat').value;
+  if (!bez) { fw.toast('Bezeichnung fehlt', true); return; }
+  if (!fzId) { fw.toast('Fahrzeug fehlt', true); return; }
+  const mhd = document.getElementById('pa-mhd')?.value || null;
+  const data = { bezeichnung: bez, intervall: int, fahrzeugId: fzId, letztesPruefDatum: datStr ? new Date(datStr) : null, mhd: mhd || null };
   if (id) { await fw.setDoc('pruefaufgaben/'+id, data); }
   else    { await fw.addDoc('pruefaufgaben', data); }
   fw.toast('Gespeichert ✅');

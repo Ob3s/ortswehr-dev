@@ -1,1 +1,1 @@
-[{"version": "20260814122654", "datum": "14.08.2026", "punkte": ["Dienst-Art speichern gleicht jetzt immer bestehende Dienste ab (vorher nur bei erkannter \u00c4nderung)", "Dienst-Arten: neuer Knopf, um bestehende Dienste einmalig mit der aktuellen 40h-Einstufung abzugleichen (bereinigt alte Karteileichen)"]}]
+[{"version": "20260818144753", "datum": "18.08.2026", "punkte": ["NEU: MHD-Feld bei Ger\u00e4tepr\u00fcfungen (optional, mit Statusampel 30 Tage vor Ablauf)", "Fix: Kalender-Import nur voriges + aktuelles Jahr, sortiert nach Datum"]}]

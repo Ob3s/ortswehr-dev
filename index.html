@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
   <meta name="theme-color" content="#cc2200">
-  <meta name="app-version" content="20260903063459">
+  <meta name="app-version" content="20260903130504">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <meta name="apple-mobile-web-app-title" content="Ortswehr">
@@ -27,7 +27,7 @@
        alte Datei unter derselben URL aus dem HTTP-Disk-Cache bedienen. Mit einer bei jedem Deploy
        geänderten Query-Version ist es für den Browser eine komplett neue URL, garantiert frischer
        Fetch. Versionsstring hier bei jedem Deploy synchron zu <meta name="app-version"> halten. -->
-  <link rel="stylesheet" href="css/style.css?v=20260903063459">
+  <link rel="stylesheet" href="css/style.css?v=20260903130504">
 </head>
 <body>
 
@@ -114,6 +114,16 @@
   🆕 Update verfügbar: <span id="update-version-label" style="font-family:monospace;font-size:0.8rem;opacity:0.8"></span>
   <button id="update-btn" style="background:var(--red);color:#fff;border:none;border-radius:8px;padding:0.35rem 0.9rem;font-size:0.85rem;cursor:pointer;font-weight:600">Jetzt aktualisieren</button>
   <button id="update-schliessen" style="background:none;border:none;color:#9ca3af;font-size:1.1rem;cursor:pointer;padding:0 0.2rem">✕</button>
+</div>
+
+<!-- Eigener, unterscheidbarer Banner fuer eine neue APK-Version (nativer Android-Build) -
+     bewusst nicht derselbe wie #update-banner oben, der meint nur den Web-Bundle-Stand (JS/CSS),
+     der ohnehin bei jedem Start automatisch frisch geladen wird. Eine neue APK braucht dagegen
+     immer eine echte Installation. -->
+<div id="apk-update-banner" style="display:none;position:fixed;bottom:70px;left:50%;transform:translateX(-50%);z-index:999;background:#1e3a5f;color:#fff;border-radius:14px;padding:0.7rem 1.2rem;align-items:center;gap:0.8rem;box-shadow:0 4px 20px rgba(0,0,0,0.3);font-size:0.88rem;white-space:nowrap">
+  📱 Neue App-Version verfügbar
+  <a id="apk-update-link" href="#" style="background:var(--red);color:#fff;border:none;border-radius:8px;padding:0.35rem 0.9rem;font-size:0.85rem;cursor:pointer;font-weight:600;text-decoration:none">Herunterladen</a>
+  <button id="apk-update-schliessen" style="background:none;border:none;color:#9ca3af;font-size:1.1rem;cursor:pointer;padding:0 0.2rem">✕</button>
 </div>
 
 <script type="module">
@@ -843,6 +853,29 @@
   // Beim Start prüfen (kurze Verzögerung damit SW-Registrierung abgeschlossen ist)
   setTimeout(pruefeAufUpdate, 1500);
 
+  // Native APK-Update: eigener, unabhängiger Check - nur relevant, wenn wir wirklich in der
+  // nativen App laufen (AppInfo-Bridge vorhanden). Quelle ist eine kleine JSON-Datei im dritten,
+  // unabhängigen Repo (ob3s.github.io), die bei jedem APK-Build mitaktualisiert wird - fehlt sie
+  // (z. B. noch kein PROD-Build so verteilt), bricht der Check einfach lautlos ab.
+  window.pruefeApkUpdate = async () => {
+    if (typeof window.AppInfo === 'undefined' || !window.AppInfo.getVersionCode) return;
+    try {
+      const datei = window.IST_DEV ? 'version-dev.json' : 'version-prod.json';
+      const res = await fetch('https://ob3s.github.io/apk/' + datei + '?t=' + Date.now(), { cache: 'no-store' });
+      if (!res.ok) return;
+      const { versionCode, apkUrl } = await res.json();
+      const installiert = window.AppInfo.getVersionCode();
+      if (!versionCode || !installiert || versionCode <= installiert) return;
+      const banner = document.getElementById('apk-update-banner');
+      const link = document.getElementById('apk-update-link');
+      if (banner && link) { link.href = apkUrl; banner.style.display = 'flex'; }
+    } catch(e) { /* stumm - kein nutzer-sichtbarer Fehler für einen optionalen Hinweis */ }
+  };
+  document.getElementById('apk-update-schliessen')?.addEventListener('click', () => {
+    document.getElementById('apk-update-banner').style.display = 'none';
+  });
+  setTimeout(pruefeApkUpdate, 2000);
+
   // Uhr
   function tickUhr() {
     const el = document.getElementById('header-uhr');
@@ -853,7 +886,7 @@
   tickUhr();
   setInterval(tickUhr, 1000);
 </script>
-<script src="js/logic.js?v=20260903063459"></script>
-<script src="js/pages.js?v=20260903063459" type="module" defer></script>
+<script src="js/logic.js?v=20260903130504"></script>
+<script src="js/pages.js?v=20260903130504" type="module" defer></script>
 </body>
 </html>

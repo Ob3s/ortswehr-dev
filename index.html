@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
   <meta name="theme-color" content="#cc2200">
-  <meta name="app-version" content="20260902162532">
+  <meta name="app-version" content="20260903063459">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <meta name="apple-mobile-web-app-title" content="Ortswehr">
@@ -27,7 +27,7 @@
        alte Datei unter derselben URL aus dem HTTP-Disk-Cache bedienen. Mit einer bei jedem Deploy
        geänderten Query-Version ist es für den Browser eine komplett neue URL, garantiert frischer
        Fetch. Versionsstring hier bei jedem Deploy synchron zu <meta name="app-version"> halten. -->
-  <link rel="stylesheet" href="css/style.css?v=20260902162532">
+  <link rel="stylesheet" href="css/style.css?v=20260903063459">
 </head>
 <body>
 
@@ -567,6 +567,7 @@
         // Warten bis SW bereit ist bevor Push registriert wird
         navigator.serviceWorker.ready.then(() => fw.registerPush()).catch(() => {});
       }
+      geraeteStatusPruefen();
       document.getElementById('login-page').classList.add('hidden');
       document.getElementById('app').classList.remove('hidden');
       document.getElementById('app-loading')?.remove();
@@ -702,6 +703,30 @@
     navigateReplace('dashboard');
   };
 
+  // Läuft bei jedem App-Start (nicht nur beim ersten) und schreibt einen kompakten Schnappschuss
+  // der Alarmierungs-Voraussetzungen ins eigene Profil - Basis für die Verwaltungs-Übersicht, wer
+  // aktuell aus welchem Grund keine Alarme bekommen könnte. Fire-and-forget: Fehler hier dürfen
+  // den restlichen App-Start nicht blockieren.
+  window.geraeteStatusPruefen = async () => {
+    try {
+      const istNativeApp = typeof window.AppInfo !== 'undefined';
+      const status = {
+        plattform: istNativeApp ? 'android' : 'web',
+        benachrichtigungen: istNativeApp
+          ? (window.GeraeteStatus?.benachrichtigungenErlaubt?.() ?? null)
+          : (typeof Notification !== 'undefined' ? Notification.permission === 'granted' : null),
+        fcmTokenVorhanden: !!fw.profil?.fcmToken,
+        // Akku/Vollbild/Hersteller nur nativ sinnvoll - im Browser gibt es diese Konzepte nicht in
+        // vergleichbarer Form (kein Auto-Revoke/Autostart-Problem wie bei installierten Android-Apps).
+        akkuOptimierungIgnoriert: istNativeApp ? (window.GeraeteStatus?.akkuOptimierungIgnoriert?.() ?? null) : null,
+        vollbildErlaubt: istNativeApp ? (window.GeraeteStatus?.vollbildErlaubt?.() ?? null) : null,
+        hersteller: istNativeApp ? (window.GeraeteStatus?.hersteller?.() ?? null) : null,
+        zuletztGeprueft: new Date(),
+      };
+      await fw.setDoc('users/'+fw.user.uid, { geraetestatus: status });
+    } catch(e) { console.warn('Geräte-Status-Check fehlgeschlagen:', e.message); }
+  };
+
   window.menuAufbauen = () => {
     const inh = document.getElementById('menu-drawer-inhalt');
     if (!inh || !fw.profil) return;
@@ -828,7 +853,7 @@
   tickUhr();
   setInterval(tickUhr, 1000);
 </script>
-<script src="js/logic.js?v=20260902162532"></script>
-<script src="js/pages.js?v=20260902162532" type="module" defer></script>
+<script src="js/logic.js?v=20260903063459"></script>
+<script src="js/pages.js?v=20260903063459" type="module" defer></script>
 </body>
 </html>

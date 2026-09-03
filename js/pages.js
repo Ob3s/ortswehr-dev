@@ -5502,6 +5502,13 @@ registerPage('verwaltung', async (el) => {
         </div>
         <div class="list-chevron">›</div>
       </div>
+      <div class="list-item" onclick="navigate('alarmierung-status')">
+        <div class="list-item-body">
+          <div class="list-item-title">Alarmierungs-Status</div>
+          <div class="list-item-sub">Wer kann gerade keine Einsatz-Alarme empfangen?</div>
+        </div>
+        <div class="list-chevron">›</div>
+      </div>
     </div>
 
     ${window.IST_DEV ? `
@@ -5530,6 +5537,62 @@ registerPage('verwaltung', async (el) => {
 
   ladeVerwaltungCounts();
   ladeAenderungsprotokoll();
+});
+
+// ── Alarmierungs-Status: wer kann aus welchem Grund gerade keine Einsatz-Alarme empfangen? ──
+// Reine Anzeige der von geraeteStatusPruefen() (index.html, läuft bei jedem App-Start) selbst
+// gemeldeten Werte - kein Fernzugriff auf fremde Geräte, jedes Gerät berichtet nur über sich
+// selbst. Auto-Revoke/Autostart lassen sich technisch nicht abfragen (keine Android-API dafür),
+// deshalb hier bewusst nicht als Ampel-Punkt aufgeführt, nur als Dauerhinweis am Seitenende.
+registerPage('alarmierung-status', async (el) => {
+  if (!fw.hatRecht('verwaltung_sehen')) { navigate('dashboard'); return; }
+  fw.setTitle('Alarmierungs-Status');
+  fw.showBack(() => navigateBack());
+  el.innerHTML = `<div class="loading">⏳</div>`;
+
+  const snap = await fw.getDocs('users');
+  const kameraden = snap.docs
+    .map(d => ({ id: d.id, ...d.data() }))
+    .filter(u => u.aktiv !== false)
+    .map(u => {
+      const gs = u.geraetestatus || null;
+      const probleme = [];
+      if (!u.fcmToken) probleme.push('Kein Push-Token');
+      if (gs) {
+        if (gs.benachrichtigungen === false) probleme.push('Benachrichtigungen verweigert');
+        if (gs.plattform === 'android' && gs.akkuOptimierungIgnoriert === false) probleme.push('Akku-Optimierung aktiv');
+        if (gs.plattform === 'android' && gs.vollbildErlaubt === false) probleme.push('Kein Vollbild-Alarm');
+      } else if (u.fcmToken) {
+        // Token vorhanden, aber noch nie ein Geräte-Status gemeldet (alte App-Version o.ä.)
+        probleme.push('Gerät noch nicht geprüft (App-Update nötig?)');
+      }
+      return { ...u, gs, probleme };
+    })
+    .sort((a, b) => b.probleme.length - a.probleme.length || (a.loginName||'').localeCompare(b.loginName||''));
+
+  const zeile = k => `
+    <div class="list-item">
+      <div class="list-item-icon">${k.probleme.length ? '🔴' : '🟢'}</div>
+      <div class="list-item-body">
+        <div class="list-item-title">${k.loginName || k.email || k.id}</div>
+        <div class="list-item-sub">${k.probleme.length ? k.probleme.join(' · ') : 'Alles in Ordnung'}${k.gs?.hersteller ? ' · '+k.gs.hersteller : ''}</div>
+      </div>
+    </div>`;
+
+  el.innerHTML = `
+    <div class="card" style="padding:0">
+      ${kameraden.map(zeile).join('')}
+    </div>
+    <div class="card">
+      <p class="muted" style="font-size:0.78rem">
+        Jedes Gerät meldet nur seinen eigenen Status, sobald die App geöffnet wird - noch nie
+        geöffnete oder sehr lange nicht genutzte Geräte tauchen hier ggf. veraltet oder gar nicht
+        differenziert auf. "Nicht verwendete App entfernen" (Android-Berechtigungs-Auto-Reset) und
+        Autostart-Einstellungen lassen sich technisch nicht auslesen - bei Verdacht bitte direkt
+        mit dem Kamerad klären.
+      </p>
+    </div>
+  `;
 });
 
 async function ladeVerwaltungCounts() {

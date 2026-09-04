@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
   <meta name="theme-color" content="#cc2200">
-  <meta name="app-version" content="20260904063107">
+  <meta name="app-version" content="20260904084209">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <meta name="apple-mobile-web-app-title" content="Ortswehr">
@@ -27,7 +27,7 @@
        alte Datei unter derselben URL aus dem HTTP-Disk-Cache bedienen. Mit einer bei jedem Deploy
        geänderten Query-Version ist es für den Browser eine komplett neue URL, garantiert frischer
        Fetch. Versionsstring hier bei jedem Deploy synchron zu <meta name="app-version"> halten. -->
-  <link rel="stylesheet" href="css/style.css?v=20260904063107">
+  <link rel="stylesheet" href="css/style.css?v=20260904084209">
 </head>
 <body>
 
@@ -433,6 +433,14 @@
       downloadBtn.className = 'btn btn-primary btn-sm';
       downloadBtn.style.textDecoration = 'none';
       downloadBtn.textContent = '⬇️ App herunterladen';
+      // Innerhalb der nativen WebView tut ein reiner Link-Klick nichts (kein DownloadListener) -
+      // per Bridge stattdessen im externen Browser öffnen, der den Download normal abwickelt.
+      downloadBtn.onclick = (e) => {
+        if (window.AppInfo?.apkHerunterladen) {
+          e.preventDefault();
+          window.AppInfo.apkHerunterladen(apkUrl);
+        }
+      };
       aktionen = [downloadBtn];
     }
 
@@ -840,7 +848,18 @@
       if (!versionCode || !installiert || versionCode <= installiert) return;
       const banner = document.getElementById('apk-update-banner');
       const link = document.getElementById('apk-update-link');
-      if (banner && link) { link.href = apkUrl; banner.style.display = 'flex'; }
+      if (banner && link) {
+        link.href = apkUrl;
+        // Reiner Link-Klick tut in der WebView nichts (kein DownloadListener) - per Bridge
+        // stattdessen im externen Browser öffnen, der den Download normal abwickelt.
+        link.onclick = (e) => {
+          if (window.AppInfo?.apkHerunterladen) {
+            e.preventDefault();
+            window.AppInfo.apkHerunterladen(apkUrl);
+          }
+        };
+        banner.style.display = 'flex';
+      }
     } catch(e) { /* stumm - kein nutzer-sichtbarer Fehler für einen optionalen Hinweis */ }
   };
   document.getElementById('apk-update-schliessen')?.addEventListener('click', () => {
@@ -858,7 +877,7 @@
   tickUhr();
   setInterval(tickUhr, 1000);
 </script>
-<script src="js/logic.js?v=20260904063107"></script>
-<script src="js/pages.js?v=20260904063107" type="module" defer></script>
+<script src="js/logic.js?v=20260904084209"></script>
+<script src="js/pages.js?v=20260904084209" type="module" defer></script>
 </body>
 </html>

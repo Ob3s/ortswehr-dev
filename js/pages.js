@@ -5591,6 +5591,14 @@ registerPage('alarmierung-status', async (el) => {
         Autostart-Einstellungen lassen sich technisch nicht auslesen - bei Verdacht bitte direkt
         mit dem Kamerad klären.
       </p>
+      ${typeof window.GeraeteStatus !== 'undefined' ? `
+      <button class="btn btn-secondary btn-sm btn-full" style="margin-top:0.5rem" onclick="window.GeraeteStatus.appEinstellungenOeffnen()">
+        Meine eigenen App-Einstellungen öffnen
+      </button>
+      <p class="muted" style="font-size:0.72rem;margin-top:0.4rem">
+        Dort: "Nicht verwendete App entfernen" bzw. "Berechtigungen automatisch zurücksetzen"
+        ausschalten (Ort/Wortlaut je nach Android-Version unterschiedlich).
+      </p>` : ''}
     </div>
   `;
 });

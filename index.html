@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
   <meta name="theme-color" content="#cc2200">
-  <meta name="app-version" content="20260903130504">
+  <meta name="app-version" content="20260904063107">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <meta name="apple-mobile-web-app-title" content="Ortswehr">
@@ -27,7 +27,7 @@
        alte Datei unter derselben URL aus dem HTTP-Disk-Cache bedienen. Mit einer bei jedem Deploy
        geänderten Query-Version ist es für den Browser eine komplett neue URL, garantiert frischer
        Fetch. Versionsstring hier bei jedem Deploy synchron zu <meta name="app-version"> halten. -->
-  <link rel="stylesheet" href="css/style.css?v=20260903130504">
+  <link rel="stylesheet" href="css/style.css?v=20260904063107">
 </head>
 <body>
 
@@ -382,7 +382,6 @@
     const istAndroid = /Android/.test(ua);
     if (!istIOS && !istAndroid) return; // Desktop: kein Hinweis nötig
 
-    const istFirefox = /Firefox\//.test(ua) || /FxiOS\//.test(ua);
     const istSafariIOS = istIOS && /Safari/.test(ua) && !/CriOS|FxiOS|EdgiOS|OPiOS/.test(ua);
 
     const box       = document.getElementById('install-hinweis');
@@ -411,20 +410,6 @@
       return btn;
     };
 
-    // Android-Intent: öffnet Chrome direkt mit der aktuellen URL (funktioniert auch aus Firefox
-    // heraus als normaler Link-Tap), fällt auf den Play-Store-Eintrag zurück falls Chrome fehlt.
-    const chromeOeffnenButton = () => {
-      const ohneSchema = location.href.replace(/^https?:\/\//, '');
-      const fallback = encodeURIComponent('https://play.google.com/store/apps/details?id=com.android.chrome');
-      const intentUrl = `intent://${ohneSchema}#Intent;scheme=https;package=com.android.chrome;S.browser_fallback_url=${fallback};end`;
-      const a = document.createElement('a');
-      a.href = intentUrl;
-      a.className = 'btn btn-primary btn-sm';
-      a.style.textDecoration = 'none';
-      a.textContent = '🌐 In Chrome öffnen';
-      return a;
-    };
-
     let istWarnung = false;
     let icon = '', titel = '', text = '';
     let aktionen = [];
@@ -434,35 +419,22 @@
       icon = '🧭'; titel = 'Installation nur über Safari möglich';
       text = 'iPhone/iPad erlauben App-Installation nur über Safari (Apple-Vorgabe, kein Fehler dieser App). Am einfachsten: Link kopieren und in Safari einfügen.';
       aktionen = [linkKopierenButton()];
-    } else if (istFirefox) { // hier immer Android, da iOS-Firefox schon oben abgefangen ist
-      istWarnung = true;
-      icon = '🌐'; titel = 'Firefox kann diese App nicht installieren';
-      text = 'Am einfachsten direkt in Chrome öffnen:';
-      aktionen = [chromeOeffnenButton(), linkKopierenButton()];
-    } else if (istIOS) { // Safari
+    } else if (istIOS) { // Safari - für iOS gibt es keine native App, PWA-Installation bleibt hier der einzige Weg
       icon = '💡'; titel = 'Als App installieren';
       text = 'Unten auf Teilen tippen, dann „Zum Home-Bildschirm" – installiert die App wie eine normale App, inkl. Icon und Benachrichtigungen.';
-    } else { // Android, Chromium-Browser
-      icon = '💡'; titel = 'Als App installieren';
-      text = 'Menü (⋮) → „App installieren" bzw. „Zum Startbildschirm hinzufügen".';
+    } else { // Android: bewusst NUR die native App anbieten, keine PWA-Installation mehr als
+             // Alternative - führte zu Verwechslungen (Nutzer dachte, die installierte PWA sei die
+             // native App, bekam dadurch nie die zuverlässigere Alarmierung der echten APK).
+      const apkUrl = window.IST_DEV ? 'https://ob3s.github.io/apk/ortswehr-dev.apk' : 'https://ob3s.github.io/apk/ortswehr.apk';
+      icon = '📲'; titel = 'App installieren';
+      text = 'Für zuverlässige Alarmierung bitte die App direkt installieren (nicht als Web-App zum Startbildschirm hinzufügen):';
+      const downloadBtn = document.createElement('a');
+      downloadBtn.href = apkUrl;
+      downloadBtn.className = 'btn btn-primary btn-sm';
+      downloadBtn.style.textDecoration = 'none';
+      downloadBtn.textContent = '⬇️ App herunterladen';
+      aktionen = [downloadBtn];
     }
-
-    // Für installierbare Chromium-Browser: nativen Install-Prompt einfangen und als direkten
-    // Button anbieten, statt nur auf das Browser-Menü zu verweisen. Das Event kann mehrfach
-    // feuern (z. B. nach Abbruch/Schließen des nativen Dialogs) - jedes Mal denselben Button
-    // wiederverwenden statt einen weiteren anzuhängen (sonst duplizieren sich die Buttons).
-    window.addEventListener('beforeinstallprompt', (e) => {
-      e.preventDefault();
-      let btn = aktionenEl.querySelector('[data-install-btn]');
-      if (!btn) {
-        btn = document.createElement('button');
-        btn.dataset.installBtn = '1';
-        btn.className = 'btn btn-primary btn-sm';
-        btn.textContent = '📲 Jetzt installieren';
-        aktionenEl.prepend(btn);
-      }
-      btn.onclick = () => e.prompt();
-    });
 
     box.style.borderLeft = '3px solid ' + (istWarnung ? 'var(--warning)' : 'var(--red)');
     iconEl.textContent = icon;
@@ -886,7 +858,7 @@
   tickUhr();
   setInterval(tickUhr, 1000);
 </script>
-<script src="js/logic.js?v=20260903130504"></script>
-<script src="js/pages.js?v=20260903130504" type="module" defer></script>
+<script src="js/logic.js?v=20260904063107"></script>
+<script src="js/pages.js?v=20260904063107" type="module" defer></script>
 </body>
 </html>
